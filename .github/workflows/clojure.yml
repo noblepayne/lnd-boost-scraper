@@ -20,6 +20,8 @@ jobs:
     - name: scrape
       run: nix-shell -p 'babashka' --run './autoscrape.sh'
     - name: encrypt
+      env:
+        AGE_PUBLIC_KEY: 'age1x96vxjw8kk855k6tf50dvrw0usd2f0nd09nwl5juv96c8jd76p8su3xgrw'
       run: nix-shell -p 'age' --run '<decrypted_secrets age -r $AGE_PUBLIC_KEY -o secrets'
     - name: cleanup
       run: rm decrypted_secrets age_key.txt
