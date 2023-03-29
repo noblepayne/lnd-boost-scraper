@@ -1,0 +1,15 @@
+name: Clojure CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: cachix/install-nix-action@v19
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+    - name: scrape
+      run: nix-shell -p 'babashka' --run scrape.sh
