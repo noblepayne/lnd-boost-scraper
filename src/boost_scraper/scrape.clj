@@ -100,9 +100,9 @@
 (defn autoscrape []
   (let [{:keys [basic-auth-secret refresh-token]}      
         (clojure.edn/read-string (slurp "decrypted_secrets"))
-        _ (println basic-auth-secret "" refresh-token)
+        ;; _ (println basic-auth-secret "" refresh-token)
         {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
-    (println refresh_token access_token)
+    ;; (println refresh_token access_token)
     (spit "decrypted_secrets" {:basic-auth-secret basic-auth-secret :refresh-token refresh_token})
     (fetch-and-format-boosts access_token 10)))
 
