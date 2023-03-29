@@ -54,6 +54,9 @@ TODO
 
 See the [open issues](https://github.com/noblepayne/alby-boost-scraper/issues) for a list of proposed features (and known issues).
 
+Also the following TODOs:
+- TODO: document using age to manually update secrets.
+
 ## Contributing
 
 Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any contributions you make are **greatly appreciated**.

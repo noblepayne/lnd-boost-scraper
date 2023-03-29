@@ -1,0 +1,41 @@
+name: autoscrape
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/60 * * * *'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v3
+    - uses: cachix/install-nix-action@v19
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+    - name: dump age key
+      env:
+        AGE_KEY: ${{ secrets.AGE_KEY }}
+      run: echo $AGE_KEY > age_key.txt
+    - name: decrypt
+      run: nix-shell -p 'age' --run 'age --decrypt -i age_key.txt -o ./decrypted_secrets ./secrets'
+    - name: scrape
+      run: nix-shell -p 'babashka' --run './autoscrape.sh' > new_boosts.md
+    - name: encrypt
+      env:
+        AGE_PUBLIC_KEY: 'age1x96vxjw8kk855k6tf50dvrw0usd2f0nd09nwl5juv96c8jd76p8su3xgrw'
+      run: nix-shell -p 'age' --run '<decrypted_secrets age -r $AGE_PUBLIC_KEY -o secrets'
+    - name: cleanup
+      run: rm decrypted_secrets age_key.txt
+    - name: commit
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "Updating secrets."
+        file_pattern: "secrets"
+    - name: Archive new boosts
+      uses: actions/upload-artifact@v3
+      with:
+        name: boosts.md
+        path: new_boosts.md
