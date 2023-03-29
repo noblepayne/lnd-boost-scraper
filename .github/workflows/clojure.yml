@@ -16,9 +16,9 @@ jobs:
         AGE_KEY: ${{ secrets.AGE_KEY }}
       run: echo $AGE_KEY > age_key.txt
     - name: decrypt
-      run: nix-shell -p 'age' --run 'age --decrypt -i age_key.txt -o secrets decrypted_secrets'
+      run: nix-shell -p 'age' --run 'age --decrypt -i age_key.txt -o ./decrypted_secrets ./secrets'
     - name: scrape
-      run: nix-shell -p 'babashka' --run autoscrape.sh
+      run: nix-shell -p 'babashka' --run './autoscrape.sh'
     - name: encrypt
       run: nix-shell -p 'age' --run '<decrypted_secrets age -r $AGE_PUBLIC_KEY -o secrets'
     - name: cleanup
