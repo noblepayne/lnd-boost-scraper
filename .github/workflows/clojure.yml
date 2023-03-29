@@ -20,7 +20,7 @@ jobs:
     - name: decrypt
       run: nix-shell -p 'age' --run 'age --decrypt -i age_key.txt -o ./decrypted_secrets ./secrets'
     - name: scrape
-      run: nix-shell -p 'babashka' --run './autoscrape.sh'
+      run: nix-shell -p 'babashka' --run './autoscrape.sh' > new_boosts.md
     - name: encrypt
       env:
         AGE_PUBLIC_KEY: 'age1x96vxjw8kk855k6tf50dvrw0usd2f0nd09nwl5juv96c8jd76p8su3xgrw'
@@ -32,3 +32,8 @@ jobs:
       with:
         commit_message: "Updating secrets."
         file_pattern: "secrets"
+    - name: Archive new boosts
+      uses: actions/upload-artifact@v3
+      with:
+        name: boosts.md
+        path: new_boosts.md
