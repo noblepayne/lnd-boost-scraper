@@ -2,6 +2,8 @@ name: autoscrape
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/60 * * * *'
 
 jobs:
   scrape:
