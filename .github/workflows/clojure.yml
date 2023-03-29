@@ -11,5 +11,20 @@ jobs:
     - uses: cachix/install-nix-action@v19
       with:
         nix_path: nixpkgs=channel:nixos-unstable
+    - name: dump age key
+      env:
+        AGE_KEY: ${{ secrets.AGE_KEY }}
+      run: echo $AGE_KEY > age_key.txt
+    - name: decrypt
+      run: nix-shell -p 'age' --run 'age --decrypt -i age_key.txt -o secrets decrypted_secrets'
     - name: scrape
-      run: nix-shell -p 'babashka' --run scrape.sh
+      run: nix-shell -p 'babashka' --run autoscrape.sh
+    - name: encrypt
+      run: nix-shell -p 'age' --run '<decrypted_secrets age -r $AGE_PUBLIC_KEY -o secrets'
+    - name: cleanup
+      run: rm decrypted_secrets age_key.txt
+    - name: commit
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "Updating secrets."
+        file_pattern: "secrets"
