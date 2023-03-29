@@ -2,3 +2,4 @@
 .clj-kondo
 .lsp
 decrypted_secrets
+age_key.txt
