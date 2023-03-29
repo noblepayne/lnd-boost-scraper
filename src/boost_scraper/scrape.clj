@@ -3,9 +3,20 @@
             [cheshire.core :as json]
             [babashka.cli :as cli]
             [clojure.string :as str]
-            [clojure.pprint]))
+            [clojure.pprint]
+            [clojure.edn]))
 
 (def alby-incoming-invoices-url "https://api.getalby.com/invoices/incoming")
+(def alby-token-refresh-url "https://api.getalby.com/oauth/token")
+
+(defn get-new-auth-token [basic-auth-secret refresh-token]
+  (-> alby-token-refresh-url
+      (http/post
+       {:headers {:authorization (str "Basic " basic-auth-secret)}
+        :form-params {"refresh_token" refresh-token
+                      "grant_type" "refresh_token"}})
+      :body
+      (json/parse-string true)))
 
 (defn get-boosts [{:keys [:token :items :page :after]}]
   (let [query-params {:items items :page page}
@@ -86,6 +97,15 @@
        str/join
        print))
 
+(defn autoscrape []
+  (let [{:keys [basic-auth-secret refresh-token]}      
+        (clojure.edn/read-string (slurp "decrypted_secrets"))
+        _ (println basic-auth-secret "" refresh-token)
+        {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
+    (println refresh_token access_token)
+    (spit "decrypted_secrets" {:basic-auth-secret basic-auth-secret :refresh-token refresh_token})
+    (fetch-and-format-boosts access_token 10)))
+
 (def cli-opts
   {:boosts {:alias :n
             :desc "Number of boosts to fetch."
@@ -121,4 +141,7 @@
 
   (->> 1 (get-n-boosts test-token) first clojure.pprint/pprint)
 
-  (->> 2 (fetch-and-format-boosts test-token) str/join print))
+  (->> 2 (fetch-and-format-boosts test-token) str/join print)
+  
+  (autoscrape)
+  )
