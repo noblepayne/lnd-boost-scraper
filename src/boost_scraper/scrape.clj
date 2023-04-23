@@ -172,9 +172,11 @@
      formatted-boosters
      "## Thanks\n"
      formatted-thanks
-     "### Total Sats\n"
-     "+ Total Sats: " (int-comma total-sats) "\n\n"
-     "### Last Seen Boost\n"
+     "### Totals\n"
+     "+ Total Sats: " (int-comma total-sats) "\n"
+     "+ Total Boosts: " (int-comma (count new-boosts)) "\n"
+     "+ Total Boosters: " (int-comma (count boosts-by-sender)) "\n"
+     "\n### Last Seen Boost\n"
      "Last seen boost id: " new-last-id
      "\n\n")))
 
@@ -185,7 +187,7 @@
         ;; _ (println basic-auth-secret "" refresh-token)
         {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
     ;; (println refresh_token access_token)
-    (spit "decrypted_secrets" {:basic-auth-secret basic-auth-secret :refresh-token refresh_token})
+    (spit "decrypted_secrets" {:basic-auth-secret basic-auth-secret :refresh-token refresh_token :last-id last-id})
     (println (boost-report access_token last-id))))
 
 
