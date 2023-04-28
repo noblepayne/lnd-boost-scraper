@@ -1,0 +1,25 @@
+name: testflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      show_name:
+        type: choice
+        description: 'Name of the show to scrape data for'
+        required: true
+        default: 'Coder Radio'
+        options: &show_list
+          - Coder Radio
+          - LINUX Unplugged
+          - Self-Hosted
+          - Office Hours
+          - Linux Action News
+
+jobs:
+  scrape_data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Scrape Show Data
+        run: echo ${ {inputs.show_name} }
