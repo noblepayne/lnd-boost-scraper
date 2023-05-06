@@ -8,7 +8,7 @@ on:
         description: 'Name of the show to scrape data for'
         required: true
         default: 'Coder Radio'
-        options: &show_list
+        options:
           - Coder Radio
           - LINUX Unplugged
           - Self-Hosted
