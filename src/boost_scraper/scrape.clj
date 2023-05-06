@@ -53,28 +53,26 @@
                      :creation_date (:creation_date %)
                      :identifier (:identifier %)))))
 
-(defn get-new-boosts [token last-boost-id]
-  (into []
-        (comp cat
-              filter-boosts
-              (take-while #(not= last-boost-id (:identifier %))))
-        (get-all-boosts token 100)))
+(defn get-new-boosts
+  ([token last-boost-id] (get-new-boosts token last-boost-id (map identity)))
+  ([token last-boost-id boost-filter]
+   (into []
+         (comp cat
+               filter-boosts
+               boost-filter
+               (take-while #(not= last-boost-id (:identifier %))))
+         (get-all-boosts token 100))))
 
-(defn get-n-boosts [token n]
-  (into []
-        (comp cat
-              #_(remove (comp empty? :memo))
-              filter-boosts
-              (take n))
-        (get-all-boosts token 100)))
-
-
-(defn format-date-old-n-busted [unix_time]
-  (let [date (java.util.Date. (* 1000 unix_time))
-        formatter (java.text.SimpleDateFormat. "MM/dd/yyyy h:mm:ss aa zzz")
-        timezone (.getTimeZone java.util.TimeZone "America/Los_Angeles")
-        _ (.setTimeZone formatter timezone)]
-    (.format formatter date)))
+(defn get-n-boosts
+  ([token n] (get-n-boosts token n (map identity)))
+  ([token n boost-filter]
+   (into []
+         (comp cat
+               #_(remove (comp empty? :memo))
+               filter-boosts
+               boost-filter
+               (take n))
+         (get-all-boosts token 100))))
 
 (defn format-date [unix-time]
   (-> (java.time.Instant/ofEpochSecond unix-time)
@@ -102,14 +100,29 @@
      "\n" "+ " app_name
      "\n" "+ " date
      "\n" "+ " identifier
-     "\n\n" "> " (or message "no message provided :(")
+     "\n\n" (str/join
+             "\n"
+             (map
+              (fn [x]
+                (let [x (str/trim x)]
+                  (if (seq x)
+                    (str "> " x) x)))
+              (str/split-lines (or message "no message provided :("))))
      "\n\n")))
 
-(defn fetch-and-format-boosts [token number-of-boosts]
-  (->> number-of-boosts
-       (get-n-boosts token)
-       (filter #(or (= "LINUX Unplugged"  (:podcast %))
-                    (str/includes? (get % :episode "") "LINUX Unplugged")))
+(defn filter-by-show [show]
+  (let [show-name (get {:lup "LINUX Unplugged"
+                        :lan "Linux Action News"
+                        :ssh "Self-Hosted"
+                        :coder "Coder Radio"
+                        :office "Office Hours"}
+                       show)]
+    (filter #(or (= show-name  (:podcast %))
+                 (str/includes? (get % :episode "") show-name)))))
+
+(defn format-boosts
+  [boosts]
+  (->> boosts
        (map format-boost)
        str/join
        print))
@@ -124,44 +137,39 @@
    {}
    boosts))
 
-(defn summarize-boosts-by-sender [boosts]
+(defn summarize-boosts-by-sender [boosts-by-sender]
   (into {}
-        (map (fn [[k v]]
-               [k {:count (count v)
-                   :sats (/ (reduce
-                             #(+ %1 (get %2 :value_msat_total 0))
-                             0
-                             v)
-                            1000)
-                   :boosts (sort-by :creation_date v)
-                   :creation_date (apply min (map :creation_date v))}]))
+        (map (fn [[sender boosts]]
+               [sender {:count (count boosts)
+                        :sats (/ (reduce
+                                  #(+ %1 (get %2 :value_msat_total 0))
+                                  0
+                                  boosts)
+                                 1000)
+                        :boosts (sort-by :creation_date boosts)
+                        :creation_date (apply min (map :creation_date boosts))}]))
 
-        boosts))
+        boosts-by-sender))
 
-(defn boost-report [token last-seen-boost-id]
-  (let [new-boosts (->> last-seen-boost-id
-                        (get-new-boosts token)
-                        (filter #(or (= "LINUX Unplugged"  (:podcast %))
-                                     (str/includes? (get % :episode "") "LINUX Unplugged")))
-                        (sort-by :creation_date))
+(defn boost-report
+  [boosts]
+  (let [; new-boosts (->> last-seen-boost-id
+        ;                 (get-new-boosts token)
+        ;                 (sort-by :creation_date))
+        new-boosts boosts
         new-last-id (->> new-boosts last :identifier)
         boosts-by-sender (summarize-boosts-by-sender
                           (boosts-by-sender new-boosts))
         total-sats (/ (reduce + (map :value_msat_total new-boosts)) 1000)
         ballers (->> boosts-by-sender
                      (filter #(<= 20000 (:sats (second %))))
-                     (sort-by (comp (juxt :sats :creation_date) second)))
-                     ;reverse)
-
+                     (sort-by (comp (juxt (comp - :sats) :creation_date) second)))
         boosters (->> boosts-by-sender
                       (filter #(<= 2000 (:sats (second %)) 20000))
-                      (sort-by (comp (juxt :creation_date :sats) second)))
-                      ;reverse)
+                      (sort-by (comp (juxt :creation_date (comp - :sats)) second)))
         thanks (->> boosts-by-sender
                     (filter #(> 2000 (:sats (second %))))
-                    (sort-by (comp (juxt :creation_date :sats) second)))
-                   ; reverse)
-
+                    (sort-by (comp (juxt :creation_date (comp - :sats)) second)))
         formatted-ballers (->> ballers (mapcat #(-> % second :boosts)) (map format-boost) str/join)
         formatted-boosters (->> boosters (mapcat #(-> % second :boosts)) (map format-boost) str/join)
         formatted-thanks (->> thanks (mapcat #(-> % second :boosts)) (map format-boost) str/join)]
@@ -176,7 +184,8 @@
      "+ Total Sats: " (int-comma total-sats) "\n"
      "+ Total Boosts: " (int-comma (count new-boosts)) "\n"
      "+ Total Boosters: " (int-comma (count boosts-by-sender)) "\n"
-     "\n### Last Seen Boost\n"
+     "\n"
+     "### Last Seen Boost\n"
      "Last seen boost id: " new-last-id
      "\n\n")))
 
@@ -187,8 +196,10 @@
         ;; _ (println basic-auth-secret "" refresh-token)
         {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
     ;; (println refresh_token access_token)
-    (spit "decrypted_secrets" {:basic-auth-secret basic-auth-secret :refresh-token refresh_token :last-id last-id})
-    (println (boost-report access_token last-id))))
+    (spit "decrypted_secrets" {:basic-auth-secret basic-auth-secret
+                               :refresh-token refresh_token
+                               :last-id last-id})
+    (println (->> (get-new-boosts access_token last-id) (boost-report)))))
 
 
 
@@ -205,7 +216,7 @@
 (defn -main [& _]
   (try
     (let [opts (cli/parse-opts *command-line-args* {:spec cli-opts :args->opts [:token :boosts]})]
-      (fetch-and-format-boosts (:token opts) (:boosts opts)))
+      (->> (get-n-boosts (:token opts) (:boosts opts)) format-boosts))
     (catch Exception e
       (if (= :org.babashka/cli (-> e bean :data :type))
         (do
@@ -227,7 +238,7 @@
   (add-tap #'p/submit)
 
 
-  (def test-token "")
+  (def test-token "OTEWNTGWYZMTZJE0OC0ZNMZHLWI4MTCTZMMYNZBHNMVKYJHL")
   (def last-lup #inst "2023-03-27T12-07:00")
 
   (->> (get-boosts
@@ -238,22 +249,33 @@
        tap>)
 
   (->> 5 (get-n-boosts test-token) #_tap> clojure.pprint/pprint)
-  (->> 1000 (get-n-boosts test-token) (filter #(= (:podcast %) "All Jupiter Broadcasting Shows")) tap>)
+  (->> 1000 (get-n-boosts test-token)
+       (filter #(= (:podcast %) "All Jupiter Broadcasting Shows")) tap>)
 
-  (->> 200 (fetch-and-format-boosts test-token) str/join print)
+  (->> (filter-by-show :lup) (get-n-boosts test-token 50) format-boosts)
+
   (->> (get-new-boosts test-token "") tap>)
 
+  (->> (filter-by-show :lup)
+       (get-new-boosts test-token "HfYzjUYrCPp9rpAk9gNhXpuc")
+       boost-report
+       (spit "/tmp/new-boosts.md"))
 
-  (spit "/tmp/new-boosts.md" (boost-report test-token ""))
-
-  (def res (get-new-boosts test-token ""))
+  (def res (get-new-boosts test-token "tJUbajM4YtU985DoKkEHancu"))
 
   (-> res boosts-by-sender summarize-boosts-by-sender)
 
 
-  (boost-report test-token "")
+  (boost-report (get-new-boosts test-token ""))
 
   (autoscrape))
 
 
-;;;;;
+;; old shit
+
+;; (defn format-date-old-n-busted [unix_time]
+;;   (let [date (java.util.Date. (* 1000 unix_time))
+;;         formatter (java.text.SimpleDateFormat. "MM/dd/yyyy h:mm:ss aa zzz")
+;;         timezone (.getTimeZone java.util.TimeZone "America/Los_Angeles")
+;;         _ (.setTimeZone formatter timezone)]
+;;     (.format formatter date)))
