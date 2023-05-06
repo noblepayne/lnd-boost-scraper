@@ -56,23 +56,25 @@
 (defn get-new-boosts
   ([token last-boost-id] (get-new-boosts token last-boost-id (map identity)))
   ([token last-boost-id boost-filter]
-   (into []
-         (comp cat
-               filter-boosts
-               boost-filter
-               (take-while #(not= last-boost-id (:identifier %))))
-         (get-all-boosts token 100))))
+   (sort-by :creation_date
+            (into []
+                  (comp cat
+                        filter-boosts
+                        boost-filter
+                        (take-while #(not= last-boost-id (:identifier %))))
+                  (get-all-boosts token 100)))))
 
 (defn get-n-boosts
   ([token n] (get-n-boosts token n (map identity)))
   ([token n boost-filter]
-   (into []
-         (comp cat
-               #_(remove (comp empty? :memo))
-               filter-boosts
-               boost-filter
-               (take n))
-         (get-all-boosts token 100))))
+   (sort-by :creation_date
+            (into []
+                  (comp cat
+                        #_(remove (comp empty? :memo))
+                        filter-boosts
+                        boost-filter
+                        (take n))
+                  (get-all-boosts token 100)))))
 
 (defn format-date [unix-time]
   (-> (java.time.Instant/ofEpochSecond unix-time)
@@ -119,6 +121,37 @@
                        show)]
     (filter #(or (= show-name  (:podcast %))
                  (str/includes? (get % :episode "") show-name)))))
+
+(defn format-summarized-boost-by-sender [[sender_name {:keys [sats creation_date boosts count]}]]
+  (let [total-sats (int-comma sats)
+        date (format-date creation_date)
+        {:keys [podcast episode app_name identifier]} (first boosts)
+        sats-n-messages (map (juxt #(int-comma (/ (:value_msat_total %) 1000)) :message) boosts)]
+    (str
+     "### From: " sender_name
+     "\n" "+ " total-sats " sats"
+     (when (< 1 count) (str "\n" "+ " count " boosts"))
+     "\n" "+ " podcast
+     "\n" "+ " episode
+     "\n" "+ " app_name
+     "\n" "+ " date
+     "\n" "+ " identifier
+     "\n\n" (str/join "\n\n"
+                      (map (fn [[sats message]]
+                             (str
+                              (when (< 1 count)
+                                (str "+ " sats " sats"
+                                     "\n"))
+                              (str/join
+                               "\n"
+                               (map
+                                (fn [x]
+                                  (let [x (str/trim x)]
+                                    (if (seq x)
+                                      (str "> " x) x)))
+                                (str/split-lines (or message "no message provided :("))))))
+                           sats-n-messages))
+     "\n\n")))
 
 (defn format-boosts
   [boosts]
@@ -170,9 +203,13 @@
         thanks (->> boosts-by-sender
                     (filter #(> 2000 (:sats (second %))))
                     (sort-by (comp (juxt :creation_date (comp - :sats)) second)))
-        formatted-ballers (->> ballers (mapcat #(-> % second :boosts)) (map format-boost) str/join)
-        formatted-boosters (->> boosters (mapcat #(-> % second :boosts)) (map format-boost) str/join)
-        formatted-thanks (->> thanks (mapcat #(-> % second :boosts)) (map format-boost) str/join)]
+        ; formatted-ballers (->> ballers (mapcat #(-> % second :boosts)) (map format-boost) str/join)
+        ; formatted-boosters (->> boosters (mapcat #(-> % second :boosts)) (map format-boost) str/join)
+        ; formatted-thanks (->> thanks (mapcat #(-> % second :boosts)) (map format-boost) str/join)]
+
+        formatted-ballers (->> ballers (map format-summarized-boost-by-sender) str/join)
+        formatted-boosters (->> boosters (map format-summarized-boost-by-sender) str/join)
+        formatted-thanks (->> thanks (map format-summarized-boost-by-sender) str/join)]
     (str
      "## Baller Boosts\n"
      formatted-ballers
@@ -238,7 +275,7 @@
   (add-tap #'p/submit)
 
 
-  (def test-token "OTEWNTGWYZMTZJE0OC0ZNMZHLWI4MTCTZMMYNZBHNMVKYJHL")
+  (def test-token "YTDLOTA4ZJMTZTBHYS0ZMTK2LWI4YTQTZME2MDLHODVKMMJI")
   (def last-lup #inst "2023-03-27T12-07:00")
 
   (->> (get-boosts
@@ -252,16 +289,16 @@
   (->> 1000 (get-n-boosts test-token)
        (filter #(= (:podcast %) "All Jupiter Broadcasting Shows")) tap>)
 
-  (->> (filter-by-show :lup) (get-n-boosts test-token 50) format-boosts)
+  (->> (filter-by-show :lup) (get-n-boosts test-token 30) format-boosts)
 
   (->> (get-new-boosts test-token "") tap>)
 
   (->> (filter-by-show :lup)
-       (get-new-boosts test-token "HfYzjUYrCPp9rpAk9gNhXpuc")
+       (get-new-boosts test-token "Y5DPwG6PzuYniZUTe57ot4SU")
        boost-report
        (spit "/tmp/new-boosts.md"))
 
-  (def res (get-new-boosts test-token "tJUbajM4YtU985DoKkEHancu"))
+  (def res (get-new-boosts test-token "Y5DPwG6PzuYniZUTe57ot4SU"))
 
   (-> res boosts-by-sender summarize-boosts-by-sender)
 
