@@ -22,7 +22,7 @@ jobs:
     - name: decrypt
       run: nix-shell -p 'age' --run './decrypt.sh'
     - name: scrape
-      run: nix-shell -p 'babashka' --run './autoscrape.sh' > new_boosts.md
+      run: nix-shell -p 'babashka' --run './autoscrape.sh :lup' > new_boosts.md
     - name: encrypt
       run: nix-shell -p 'age' --run './encrypt.sh'
     - name: cleanup

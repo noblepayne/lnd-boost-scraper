@@ -137,6 +137,7 @@
      "\n" "+ " date
      "\n" "+ " identifier
      "\n\n" (str/join "\n\n"
+                      ;; TODO: clean up
                       (map (fn [[sats message]]
                              (str
                               (when (< 1 count)
@@ -227,16 +228,27 @@
      "\n\n")))
 
 
-(defn autoscrape []
-  (let [{:keys [basic-auth-secret refresh-token last-id]}
+(defn autoscrape [show]
+  (let [{:keys [basic-auth-secret refresh-token last-ids] :as secrets}
         (clojure.edn/read-string (slurp "decrypted_secrets"))
         ;; _ (println basic-auth-secret "" refresh-token)
-        {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
+        {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)
+        show (clojure.edn/read-string show)]
     ;; (println refresh_token access_token)
-    (spit "decrypted_secrets" {:basic-auth-secret basic-auth-secret
-                               :refresh-token refresh_token
-                               :last-id last-id})
-    (println (->> (get-new-boosts access_token last-id) (boost-report)))))
+    (spit "decrypted_secrets" (merge secrets
+                                     {:refresh-token refresh_token}))
+    (println (->> (get-new-boosts access_token
+                                  (get last-ids show)
+                                  (filter-by-show show))
+                  (boost-report)))))
+
+
+(defn update-last-id [show last-id]
+  (let [{:keys [last-ids] :as secrets}
+        (clojure.edn/read-string (slurp "decrypted_secrets"))
+        show (clojure.edn/read-string show)
+        last-ids (merge last-ids {show last-id})]
+    (spit "decrypted_secrets" (merge secrets {:last-ids last-ids}))))
 
 
 
