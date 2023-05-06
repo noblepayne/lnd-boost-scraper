@@ -2,6 +2,18 @@ name: autoscrape
 
 on:
   workflow_dispatch:
+    inputs:
+      show_name:
+        type: choice
+        description: 'Name of show for boost report'
+        required: true
+        default: 'LINUX Unplugged'
+        options: &show_list
+          - Coder Radio
+          - LINUX Unplugged
+          - Self-Hosted
+          - Office Hours
+          - Linux Action News
   schedule:
     - cron: '*/60 * * * *'
 
@@ -21,8 +33,12 @@ jobs:
       run: echo $AGE_KEY > age_key.txt
     - name: decrypt
       run: nix-shell -p 'age' --run './decrypt.sh'
+    - name: Set SHOW
+      env:
+        DEFAULT_SHOW: :lup
+      run: echo "SHOW=${{ github.event.inputs.show_name || env.DEFAULT_SHOW }}" >> $GITHUB_ENV
     - name: scrape
-      run: nix-shell -p 'babashka' --run './autoscrape.sh :lup' > new_boosts.md
+      run: nix-shell -p 'babashka' --run "./autoscrape.sh $SHOW" > new_boosts.md
     - name: encrypt
       run: nix-shell -p 'age' --run './encrypt.sh'
     - name: cleanup

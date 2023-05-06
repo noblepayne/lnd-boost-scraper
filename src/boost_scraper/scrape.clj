@@ -9,6 +9,14 @@
 (def alby-incoming-invoices-url "https://api.getalby.com/invoices/incoming")
 (def alby-token-refresh-url "https://api.getalby.com/oauth/token")
 
+(def show-by-id {:lup "LINUX Unplugged"
+                 :lan "Linux Action News"
+                 :ssh "Self-Hosted"
+                 :coder "Coder Radio"
+                 :office "Office Hours"})
+
+(def id-by-show (into {} (map (comp vec reverse) show-by-id)))
+
 (defn get-new-auth-token [basic-auth-secret refresh-token]
   (-> alby-token-refresh-url
       (http/post
@@ -113,12 +121,7 @@
      "\n\n")))
 
 (defn filter-by-show [show]
-  (let [show-name (get {:lup "LINUX Unplugged"
-                        :lan "Linux Action News"
-                        :ssh "Self-Hosted"
-                        :coder "Coder Radio"
-                        :office "Office Hours"}
-                       show)]
+  (let [show-name (get show-by-id show)]
     (filter #(or (= show-name  (:podcast %))
                  (str/includes? (get % :episode "") show-name)))))
 
@@ -227,13 +230,23 @@
      "Last seen boost id: " new-last-id
      "\n\n")))
 
+(defn read-show-key [raw-show]
+  (let [parsed-show (clojure.edn/read-string (str raw-show))
+        parsed-show (if (keyword? parsed-show) parsed-show raw-show)
+        show (cond
+               (contains? show-by-id parsed-show) parsed-show
+               (contains? id-by-show parsed-show) (get id-by-show parsed-show))]
+    (if (nil? show)
+      (throw (ex-info "Unknown show!" {:raw-show raw-show :parsed-show parsed-show}))
+      show)))  
 
-(defn autoscrape [show]
-  (let [{:keys [basic-auth-secret refresh-token last-ids] :as secrets}
+(defn autoscrape [& args]
+  (let [raw-show (str/join " " args)
+        show (read-show-key raw-show)
+        {:keys [basic-auth-secret refresh-token last-ids] :as secrets}
         (clojure.edn/read-string (slurp "decrypted_secrets"))
         ;; _ (println basic-auth-secret "" refresh-token)
-        {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)
-        show (clojure.edn/read-string show)]
+        {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
     ;; (println refresh_token access_token)
     (spit "decrypted_secrets" (merge secrets
                                      {:refresh-token refresh_token}))
@@ -243,10 +256,12 @@
                   (boost-report)))))
 
 
-(defn update-last-id [show last-id]
-  (let [{:keys [last-ids] :as secrets}
+(defn update-last-id [& args]
+  (let [[last-id & show-args] (reverse args)
+        show (str/join " " (reverse show-args))
+        show (read-show-key show)
+        {:keys [last-ids] :as secrets}
         (clojure.edn/read-string (slurp "decrypted_secrets"))
-        show (clojure.edn/read-string show)
         last-ids (merge last-ids {show last-id})]
     (spit "decrypted_secrets" (merge secrets {:last-ids last-ids}))))
 
@@ -317,7 +332,7 @@
 
   (boost-report (get-new-boosts test-token ""))
 
-  (autoscrape))
+  (autoscrape :lup))
 
 
 ;; old shit
