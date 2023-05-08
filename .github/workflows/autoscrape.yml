@@ -35,6 +35,7 @@ jobs:
       run: nix-shell -p 'age' --run './decrypt.sh'
     - name: Set SHOW
       env:
+      # https://evanhalley.dev/post/github-actions-workflow-with-inputs/
         DEFAULT_SHOW: :lup
       run: echo "SHOW=${{ github.event.inputs.show_name || env.DEFAULT_SHOW }}" >> $GITHUB_ENV
     - name: scrape
