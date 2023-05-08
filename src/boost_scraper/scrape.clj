@@ -202,7 +202,7 @@
                      (filter #(<= 20000 (:sats (second %))))
                      (sort-by (comp (juxt (comp - :sats) :creation_date) second)))
         boosters (->> boosts-by-sender
-                      (filter #(<= 2000 (:sats (second %)) 20000))
+                      (filter #(<= 2000 (:sats (second %)) 19999))
                       (sort-by (comp (juxt :creation_date (comp - :sats)) second)))
         thanks (->> boosts-by-sender
                     (filter #(> 2000 (:sats (second %))))
