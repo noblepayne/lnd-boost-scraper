@@ -40,7 +40,7 @@ jobs:
       # https://evanhalley.dev/post/github-actions-workflow-with-inputs/
         DEFAULT_SHOW: :lup
       run: echo "SHOW=${{ github.event.inputs.show_name || env.DEFAULT_SHOW }}" >> $GITHUB_ENV
-    - name: scrape
+    - name: update last seen id
       run: nix-shell -p 'babashka' --run "./update-last-id.sh $SHOW ${{ github.event.inputs.last_seen_id }}"
     - name: encrypt
       run: nix-shell -p 'age' --run './encrypt.sh'
@@ -49,7 +49,7 @@ jobs:
     - name: commit
       uses: stefanzweifel/git-auto-commit-action@v4
       with:
-        commit_message: "Updating secrets."
+        commit_message: "Updating last seen IDs."
         file_pattern: "secrets"
     - name: Archive new boosts
       uses: actions/upload-artifact@v3
