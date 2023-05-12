@@ -29,6 +29,15 @@ A minimum viable boost scraper. Fetches invoices from the Alby Wallet API and ou
 
 Initial version requires an oauth token sourced externally and passed on the command line. 
 
+## Bookmarklet
+```
+alert(JSON.parse(localStorage.getItem("conshax-strg") || '{"refreshToken": "NO TOKEN FOUND"}')["refreshToken"]);
+```
+
+```
+javascript:(function()%7Balert(JSON.parse(localStorage.getItem(%22conshax-strg%22)%20%7C%7C%20'%7B%22refreshToken%22%3A%20%22NO%20TOKEN%20FOUND%22%7D')%5B%22refreshToken%22%5D)%3B%7D)()%3B
+```
+
 ## Built With
 
 * [Babashka](https://babashka.org)
