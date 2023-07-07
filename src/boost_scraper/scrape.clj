@@ -13,7 +13,8 @@
                  :lan "Linux Action News"
                  :ssh "Self-Hosted"
                  :coder "Coder Radio"
-                 :office "Office Hours"})
+                 :office "Office Hours"
+                 :bdadpod "Bitcoin Dad Pod"})
 
 (def id-by-show (into {} (map (comp vec reverse) show-by-id)))
 
@@ -238,7 +239,7 @@
                (contains? id-by-show parsed-show) (get id-by-show parsed-show))]
     (if (nil? show)
       (throw (ex-info "Unknown show!" {:raw-show raw-show :parsed-show parsed-show}))
-      show)))  
+      show)))
 
 (defn autoscrape [& args]
   (let [raw-show (str/join " " args)
@@ -247,7 +248,7 @@
         (clojure.edn/read-string (slurp "decrypted_secrets"))
         ;; _ (println basic-auth-secret "" refresh-token)
         {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
-    ;; (println refresh_token access_token)
+    (println refresh_token access_token)
     (spit "decrypted_secrets" (merge secrets
                                      {:refresh-token refresh_token}))
     (println (->> (get-new-boosts access_token
@@ -302,7 +303,7 @@
   (add-tap #'p/submit)
 
 
-  (def test-token "YTDLOTA4ZJMTZTBHYS0ZMTK2LWI4YTQTZME2MDLHODVKMMJI")
+  (def test-token "...")
   (def last-lup #inst "2023-03-27T12-07:00")
 
   (->> (get-boosts
@@ -312,16 +313,19 @@
                     (= "streaming" (-> % :boostagram :action))))
        tap>)
 
-  (->> 5 (get-n-boosts test-token) #_tap> clojure.pprint/pprint)
-  (->> 1000 (get-n-boosts test-token)
-       (filter #(= (:podcast %) "All Jupiter Broadcasting Shows")) tap>)
+  (->> 10 (get-n-boosts test-token) #_tap> clojure.pprint/pprint)
+  (->> 100 (get-n-boosts test-token)
+       ; (filter #(= (:podcast %) "All Jupiter Broadcasting Shows")) tap>)
+       (filter #(= (:podcast %) "Bitcoin Dad Pod")) boost-report)
 
   (->> (filter-by-show :lup) (get-n-boosts test-token 30) format-boosts)
+  (->> (filter-by-show :coder) (get-n-boosts test-token 30) format-boosts)
+  (->> (filter-by-show :bdadpod) (get-n-boosts test-token 10) format-boosts)
 
   (->> (get-new-boosts test-token "") tap>)
 
-  (->> (filter-by-show :lup)
-       (get-new-boosts test-token "Y5DPwG6PzuYniZUTe57ot4SU")
+  (->> (filter-by-show :coder)
+       (get-new-boosts test-token "xmf9GD1hDCtro3LctcTEdEE8")
        boost-report
        (spit "/tmp/new-boosts.md"))
 
