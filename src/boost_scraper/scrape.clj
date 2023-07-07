@@ -248,7 +248,7 @@
         (clojure.edn/read-string (slurp "decrypted_secrets"))
         ;; _ (println basic-auth-secret "" refresh-token)
         {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
-    (println refresh_token access_token)
+    ;; (println refresh_token access_token)
     (spit "decrypted_secrets" (merge secrets
                                      {:refresh-token refresh_token}))
     (println (->> (get-new-boosts access_token
