@@ -14,8 +14,9 @@ on:
           - Self-Hosted
           - Office Hours
           - Linux Action News
+          - Bitcoin Dad Pod
   schedule:
-    - cron: '*/60 * * * *'
+    - cron: '5 8 * * *'
 
 jobs:
   scrape:
