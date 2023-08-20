@@ -84,3 +84,13 @@ Contributions are what make the open source community such an amazing place to b
 ## License
 
 Distributed under the MIT License. See [LICENSE](https://github.com/noblepayne/alby-boost-scraper/blob/main/LICENSE.md) for more information.
+
+
+
+
+### Token Hackery
+```
+window.indexedDB.open("invoiceDb").onsuccess = (event) => {event.target.result.transaction("authTable").objectStore("authTable").get(1).onsuccess = (event) => {alert(event.target.result.authStatus.oauthTokens.accessToken);};};
+
+window.indexedDB.open("invoiceDb").onsuccess = (event) => {event.target.result.transaction("authTable").objectStore("authTable").get(1).onsuccess = (event) => {alert(event.target.result.authStatus.oauthTokens.refreshToken);};};
+```
