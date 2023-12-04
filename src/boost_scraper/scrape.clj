@@ -13,7 +13,7 @@
                  :lan "Linux Action News"
                  :ssh "Self-Hosted"
                  :coder "Coder Radio"
-                 :office "Office Hours"
+                 :office "Office Hours 2.0"
                  :bdadpod "Bitcoin Dad Pod"})
 
 (def id-by-show (into {} (map (comp vec reverse) show-by-id)))
