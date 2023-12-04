@@ -93,4 +93,6 @@ Distributed under the MIT License. See [LICENSE](https://github.com/noblepayne/a
 window.indexedDB.open("invoiceDb").onsuccess = (event) => {event.target.result.transaction("authTable").objectStore("authTable").get(1).onsuccess = (event) => {alert(event.target.result.authStatus.oauthTokens.accessToken);};};
 
 window.indexedDB.open("invoiceDb").onsuccess = (event) => {event.target.result.transaction("authTable").objectStore("authTable").get(1).onsuccess = (event) => {alert(event.target.result.authStatus.oauthTokens.refreshToken);};};
+
+alert(JSON.parse(localStorage.getItem("conshax-strg") %7C%7C '%7B"oauthToken"%3A "NO TOKEN FOUND"%7D')%5B"oauthToken"%5D)%3B%7D)
 ```
