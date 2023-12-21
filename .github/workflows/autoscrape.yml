@@ -15,8 +15,8 @@ on:
           - 'Office Hours 2.0'
           - Linux Action News
           - Bitcoin Dad Pod
-  schedule:
-    - cron: '5 8 * * *'
+  # schedule:
+  #   - cron: '5 8 * * *'
 
 jobs:
   scrape:
