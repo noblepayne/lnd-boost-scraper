@@ -14,7 +14,8 @@
                  :ssh "Self-Hosted"
                  :coder "Coder Radio"
                  :office "Office Hours 2.0"
-                 :bdadpod "Bitcoin Dad Pod"})
+                 :bdadpod "Bitcoin Dad Pod"
+                 :unfilter "Unfilter"})
 
 (def id-by-show (into {} (map (comp vec reverse) show-by-id)))
 

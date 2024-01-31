@@ -15,6 +15,7 @@ on:
           - 'Office Hours 2.0'
           - Linux Action News
           - Bitcoin Dad Pod
+          - Unfilter
   schedule:
     - cron: '5 8 * * *'
 
