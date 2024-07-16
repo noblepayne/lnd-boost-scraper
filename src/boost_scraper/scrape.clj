@@ -18,6 +18,11 @@
                  :unfilter "Unfilter"
                  :twib "This Week in Bitcoin"})
 
+(def extra-show-titles-by-id
+  {:lup #{"LIVE Unplugged" "Core Contributor"}
+   :coder #{"Coder QA"}
+   :ssh #{"Self-Hosted SRE"}})
+
 (def id-by-show (into {} (map (comp vec reverse) show-by-id)))
 
 (defn get-new-auth-token [basic-auth-secret refresh-token]
@@ -126,6 +131,7 @@
 (defn filter-by-show [show]
   (let [show-name (get show-by-id show)]
     (filter #(or (= show-name  (:podcast %))
+                 ((get extra-show-titles-by-id show #{}) (:podcast %))
                  (str/includes? (get % :episode "") show-name)))))
 
 (defn format-summarized-boost-by-sender [[sender_name {:keys [sats creation_date boosts count]}]]
@@ -250,7 +256,7 @@
         (clojure.edn/read-string (slurp "decrypted_secrets"))
         ;; _ (println basic-auth-secret "" refresh-token)
         {:keys [refresh_token access_token]} (get-new-auth-token basic-auth-secret refresh-token)]
-    ;; (println refresh_token access_token)
+    ;; TODO: stderr (println refresh_token access_token)
     (spit "decrypted_secrets" (merge secrets
                                      {:refresh-token refresh_token}))
     (println (->> (get-new-boosts access_token
