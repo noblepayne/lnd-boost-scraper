@@ -26,7 +26,9 @@
 (def id-by-show (into {} (map (comp vec reverse) show-by-id)))
 
 (defn get-new-auth-token [basic-auth-secret refresh-token]
-  (-> alby-token-refresh-url
+  ;; Inject static personal alby access token from Env
+  (System/get-env "ALBY_ACCESS_TOKEN")
+  #_(-> alby-token-refresh-url
       (http/post
        {:headers {:authorization (str "Basic " basic-auth-secret)}
         :form-params {"refresh_token" refresh-token
