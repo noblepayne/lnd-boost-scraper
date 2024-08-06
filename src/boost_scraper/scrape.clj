@@ -27,7 +27,8 @@
 
 (defn get-new-auth-token [basic-auth-secret refresh-token]
   ;; Inject static personal alby access token from Env
-  (System/getenv "ALBY_ACCESS_TOKEN")
+  (let [token (System/getenv "ALBY_ACCESS_TOKEN")]
+    {:refresh_token token :access_token token})
   #_(-> alby-token-refresh-url
       (http/post
        {:headers {:authorization (str "Basic " basic-auth-secret)}
