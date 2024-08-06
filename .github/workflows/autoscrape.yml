@@ -42,6 +42,8 @@ jobs:
         DEFAULT_SHOW: :lup
       run: echo "SHOW=${{ github.event.inputs.show_name || env.DEFAULT_SHOW }}" >> $GITHUB_ENV
     - name: scrape
+      env:
+        ALBY_ACCESS_TOKEN: ${{ secrets.ALBY_ACCESS_TOKEN }}
       run: nix-shell -p 'babashka' --run "./autoscrape.sh $SHOW" > new_boosts.md
     - name: encrypt
       run: nix-shell -p 'age' --run './encrypt.sh'
