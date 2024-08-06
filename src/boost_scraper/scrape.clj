@@ -1,7 +1,7 @@
 (ns boost-scraper.scrape
   (:require [babashka.http-client :as http]
             [cheshire.core :as json]
-            [babashka.cli :as cli]
+            #_[babashka.cli :as cli]
             [clojure.string :as str]
             [clojure.pprint]
             [clojure.edn]))
@@ -289,7 +289,7 @@
            :require true
            :coerce :string}})
 
-(defn -main [& _]
+#_(defn -main [& _]
   (try
     (let [opts (cli/parse-opts *command-line-args* {:spec cli-opts :args->opts [:token :boosts]})]
       (->> (get-n-boosts (:token opts) (:boosts opts)) format-boosts))
