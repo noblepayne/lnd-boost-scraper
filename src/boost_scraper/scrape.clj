@@ -314,7 +314,8 @@
   (add-tap #'p/submit)
 
 
-  (def test-token "***REMOVED***")
+  (def test-token (or (System/getenv "ALBY_ACCESS_TOKEN") ""))
+
   (def last-lup #inst "2023-03-27T12-07:00")
 
   (->> (get-boosts
