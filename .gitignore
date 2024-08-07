@@ -1,5 +1,8 @@
 .calva
 .clj-kondo
 .lsp
+.cpcache
+.env
+.devenv
 decrypted_secrets
 age_key.txt

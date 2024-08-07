@@ -1,7 +1,7 @@
 (ns boost-scraper.scrape
   (:require [babashka.http-client :as http]
             [cheshire.core :as json]
-            #_[babashka.cli :as cli]
+            [babashka.cli :as cli]
             [clojure.string :as str]
             [clojure.pprint]
             [clojure.edn]))
@@ -289,7 +289,7 @@
            :require true
            :coerce :string}})
 
-#_(defn -main [& _]
+(defn -main [& _]
   (try
     (let [opts (cli/parse-opts *command-line-args* {:spec cli-opts :args->opts [:token :boosts]})]
       (->> (get-n-boosts (:token opts) (:boosts opts)) format-boosts))
@@ -314,7 +314,7 @@
   (add-tap #'p/submit)
 
 
-  (def test-token "***REMOVED***")
+  (def test-token (or (System/getenv "ALBY_ACCESS_TOKEN") ""))
   (def last-lup #inst "2023-03-27T12-07:00")
 
   (->> (get-boosts

@@ -1,15 +1,16 @@
 (ns boost-scraper.scrapev2
+  (:gen-class)
   (:require [babashka.http-client :as http]
             [cheshire.core :as json]
-            #_[babashka.cli :as cli]
-            [clojure.core.async :as as]
-            [babashka.pods :as pods]
+            [babashka.cli :as cli]
+            [clojure.core.async :as async]
+            #_[babashka.pods :as pods]
             [datalevin.core :as d]
             [clojure.java.io :as io]
             [clojure.instant]
             [clojure.string :as str]
-            [clojure.pprint]
-            [clojure.edn]
+            [clojure.pprint :as pprint]
+            [clojure.edn :as edn]
             [boost-scraper.scrape :as v1]))
 
 #_(pods/load-pod 'huahaiy/datalevin "0.8.25")
@@ -72,7 +73,7 @@
                                     :items items
                                     :page (inc page)})
 
-                 :data data}] 
+                 :data data}]
       (try
         (->> data
              (filter :creation_date)
@@ -111,7 +112,7 @@
           next_ {:next (into last_ {:macaroon  macaroon
                                     :offset (get data :first_index_offset)})
 
-                 :data (:invoices data)}] 
+                 :data (:invoices data)}]
       (try
         (->> data
              :invoices
@@ -124,8 +125,7 @@
       (when wait
         (println "waiting...")
         (Thread/sleep wait)
-        (println "DONE WAITING")
-        )
+        (println "DONE WAITING"))
       #_(reset! get-boosts-state (:next next_))
       next_)))
 
@@ -141,14 +141,26 @@
 (def schema
   {:invoice/identifier {:db/valueType :db.type/string
                         :db/unique :db.unique/identity}
+   :invoice/source {:db/valueType :db.type/string}
    :invoice/creation_date {:db/valueType :db.type/long}
+   :invoice/creation_date_per_30 {:db/valueType :db.type/long}
    :invoice/created_at {:db/valueType :db.type/instant}
    :invoice/add_index {:db/valueType :db.type/long}
    :boostagram/sender_name {:db/valueType :db.type/string}
+   :boostagram/sender_name_normalized {:db/valueType :db.type/string}
    :boostagram/episode {:db/valueType :db.type/string}
    :boostagram/podcast {:db/valueType :db.type/string}
    :boostagram/app_name {:db/valueType :db.type/string}
    :boostagram/action {:db/valueType :db.type/string}
+   :boostagram/message {:db/valueType :db.type/string}
+   #_:boostagram/dedup_id #_{:db/valueType :db.type/tuple
+                         :db/unique :db.unique/identity
+                         :db/tupleAttrs [:boostagram/sender_name_normalized
+                                         :boostagram/podcast
+                                         :boostagram/message
+                                         :boostagram/value_msat_total
+                                         :boostagram/action
+                                         :invoice/creation_date_per_30]}
    :boostagram/value_msat_total {:db/valueType :db.type/long}
    :boostagram/value_sat_total {:db/valueType :db.type/long}}
     ;;
@@ -213,7 +225,7 @@
     (catch Exception e (println "EXCEPTION DECODING BOOST: " rawboost) {})))
 
 (defn coerce-invoice-vals [invoice]
-  (let [#_invoice #_(if-let [created_at (get invoice :invoice/created_at)]
+  (let [invoice (if-let [created_at (get invoice :invoice/created_at)]
                       (assoc
                        invoice
                        :invoice/created_at
@@ -235,7 +247,15 @@
                   (assoc
                    invoice
                    :invoice/creation_date
-                   (Integer/parseInt creation_date))
+                   (if (string? creation_date) (Integer/parseInt creation_date) creation_date))
+                  invoice)
+        invoice (if-let [creation_date (get invoice :invoice/creation_date)]
+                  (assoc
+                   invoice
+                   :invoice/creation_date_per_30
+                   (if (= "boost" (get invoice :boostagram/action))
+                     (quot creation_date 30)
+                     (rand-int 1000000000)))
                   invoice)
         invoice (if-let [creation_date (get invoice :invoice/creation_date)]
                   (assoc
@@ -245,9 +265,9 @@
                   invoice)
         invoice (if-let [[{{rawboost :7629169} :custom_records} :as debug] (get invoice :invoice/htlcs)]
                   (do #_(println debug "\n")
-                      (into
-                       (dissoc invoice :invoice/htlcs)
-                       (decode-boost rawboost)))
+                   (into
+                    (dissoc invoice :invoice/htlcs)
+                    (decode-boost rawboost)))
                   invoice)
         invoice (if-let [sender_name (get invoice :boostagram/sender_name)]
                   (assoc
@@ -282,6 +302,7 @@
 (defn scrape-boosts-after [conn token items-per-page wait after]
   (->> (get-all-boosts token items-per-page :wait wait :after after)
        (map process-batch)
+       #_(#(do (clojure.pprint/pprint %) %))
        (run! (fn [x]
                #_(println "BATCH!")
                (d/transact! conn x)))))
@@ -368,22 +389,19 @@
 
 (alter-var-root #'*out* (constantly *out*))
 
+(defn -main [& args]
+  (println args))
+
 (comment
 
   (require '[portal.api :as p])
   (p/open)
   (add-tap #'p/submit)
 
-  ;; WES: (def test-token "***REMOVED***")
-  ;; CHRIS
-  (def test-token "***REMOVED***")
+  (def test-token (or (System/getenv "ALBY_ACCESS_TOKEN") ""))
 
   (def last-lup #inst "2023-03-27T12-07:00")
 
-  (def tokens
-    (get-new-auth-token
-     "***REMOVED***"
-     "***REMOVED***"))
 
 ;; v2
 
@@ -410,13 +428,13 @@
   (reset! scrape-can-run true)
   #_@get-boosts-state
 
-  (as/take!
-   (as/thread-call (fn []
+  (async/take!
+   (async/thread-call (fn []
                      ;;(scrape-boosts-since conn test-token
-                     (scrape-boosts-after conn test-token
-                                          100 3000
-                                          #_#inst "2024-07-25T00:00"
-                                          #inst "2023-12-31T11:59Z")))
+                        (scrape-boosts-after conn test-token
+                                             100 3000
+                                             #_#inst "2024-07-25T00:00"
+                                             #inst "2023-12-31T11:59Z")))
    (fn [_] (println "ALL DONE!")))
 
   (boosties-v1 conn "boost")
@@ -489,7 +507,6 @@
   (d/q '[:find (pull ?e ["*"])
          :where [?e :boostagram/podcast "Mere Mortals"]]
        (d/db conn))
-
 
   ;; WIP: new boost report query
 
@@ -632,53 +649,69 @@
                (d/db conn)
                last-seen)))
 
-  (require '[boost-scraper.scrape :as v1])
 
-  (defn get-lnd-coder-boosts [since]
-    (sort-by :invoice/creation_date
-             (into []
-                   (comp cat
-                         #_(take 10)
-                         (map #(into (sorted-map) %)))
-                   (d/q '[:find (d/pull ?e [:boostagram/app_name
-                                            :boostagram/podcast
-                                            :boostagram/episode
-                                            :boostagram/sender_name_normalized
-                                            :boostagram/value_msat_total
-                                            :boostagram/value_sat_total
-                                            :boostagram/message
-                                            :invoice/identifier
-                                            :invoice/created_at
-                                            :invoice/creation_date])
-                          :in $ ?s
-                          :where [?e :boostagram/action "boost"]
-                          [?e0 :invoice/identifier ?s]
-                          [?e0 :invoice/creation_date ?cd0]
-                          [?e :invoice/creation_date ?cd]
-                          [(< ?cd0 ?cd)]
-                          [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
-                          [?e :boostagram/podcast ?podcast]
-                          [(re-pattern "(?i).*linux.*") ?regex]
-                          (or #_[?e :boostagram/podcast "Coder Radio"]
-                              #_[?e :boostagram/podcast "Coder QA"]
-                              [(re-matches ?regex ?podcast) _]
-                              [(re-matches ?regex ?episode) _])]
-                        (d/db conn)
-                        since))))
+  (defn get-lnd-boosts-from-db [conn show-regex last-seen-idx]
+    (into (sorted-set-by (fn [& args] (apply compare (reverse (map :invoice/creation_date args)))))
+          (comp cat
+                #_(take 10)
+                ;; sort keys of each boost
+                (map #(into (sorted-map) %)))
+          (d/q '[:find (d/pull ?e [:*] #_[:boostagram/app_name
+                                   :boostagram/podcast
+                                   :boostagram/episode
+                                   :boostagram/sender_name_normalized
+                                   :boostagram/value_msat_total
+                                   :boostagram/value_sat_total
+                                   :boostagram/message
+                                   :invoice/identifier
+                                   :invoice/created_at
+                                   :invoice/creation_date])
+                 :in $ ?regex ?last-seen-idx
+                 :where
+                 ;; only find boosts
+                 [?e :boostagram/action "boost"]
+                 ;; with creation_date's after our "since" marker
+                 [?e :invoice/creation_date ?cd]
+                 #_[?e0 :invoice/identifier ?last-seen-idx]
+                 #_[?e0 :invoice/creation_date ?cd0] 
+                 #_[(< ?cd0 ?cd)]
+                 [(< ?last-seen-idx ?cd)]
+                 ;; match podcast and episode to find all episodes of `show`
+                 [?e :boostagram/podcast ?podcast]
+                 [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                 (or
+                  [(re-matches ?regex ?podcast) _]
+                  [(re-matches ?regex ?episode) _])]
+               (d/db conn)
+               show-regex
+               last-seen-idx)))
 
-  (->> #_"yvfk9pFe5CWWddwwFdCyTthy" #_"A4CHBDDTNjxsPSdZXh56VbeE"
-   #_(get-ballers conn)
-   #_(get-normal-boosts conn)
-   #_(get-thanks conn)
-   #_(get-summary conn)
-   #_(get-all-boosts-since conn)
-   (get-lnd-coder-boosts "447548")
-       (map (fn [x] (map (fn [[k v]] [(keyword (name k)) v]) x)))
-       (map (fn [x] (map (fn [[k v]] [(if (= k :sender_name_normalized) :sender_name k) v]) x)))
-       (mapv #(into (sorted-map) %))
-       v1/boost-report
-       (spit "/tmp/bost_test")
-       #_clojure.pprint/pprint)
+  (defn v2->v1 [v2-boosts]
+    (->> v2-boosts
+         ;; remove namespaces from keys
+         (mapv
+          (fn [boost]
+            (into {}
+                  (map (fn [[k v]]
+                         [(keyword (name k)) v]))
+                  boost))) 
+         ;; rename :sender_name_normalized -> :sender_name
+         (mapv
+          (fn [boost]
+            (into {}
+                  (map (fn [[k v]]
+                         [(if (= k :sender_name_normalized) :sender_name k) v]))
+                  boost)))))
+
+  (defn boost-report-v2 [conn show-regex last-seen-index]
+    (->> (get-lnd-boosts-from-db conn show-regex last-seen-index)
+         #_v2->v1
+         #_v1/boost-report
+         (#(with-out-str (clojure.pprint/pprint %)))
+         (spit "/tmp/new_boosts.md")))
+  
+  (boost-report-v2 conn #"(?i).*linux.*" (-> #inst "2024-07-01T00:00Z" (#(.getTime %)) (/ 1000)))
+  (boost-report-v2 conn #"(?i).*self.*" "443250")
 
   (defn make-stream-summary [conn last-seen]
     (let [[sats streams streamers] (get-stream-summary conn last-seen)]
@@ -726,7 +759,7 @@
         javax.xml.bind.DatatypeConverter/printHexBinary
         (#(.toLowerCase %))))
 
-  ;; basic baes64
+  ;; basic base64
   (.encodeToString (java.util.Base64/getEncoder) (.getBytes "wes"))
   (java.lang.String. (.decode (java.util.Base64/getDecoder) "d2Vz"))
 
@@ -735,10 +768,23 @@
 
   (reset! scrape-can-run false)
   (reset! scrape-can-run true)
-  (as/take!
-   (as/thread-call (fn []
-                     (scrape-lnd-boosts conn macaroon 500)))
+  (async/take!
+   (async/thread-call (fn []
+                        (scrape-lnd-boosts conn macaroon 500)))
    (fn [x] (println "========== DONE ==========" x)))
+
+(def schema
+  {:invoice/identifier {:db/valueType :db.type/string
+                        :db/unique :db.unique/identity}
+   :t1 {:db/valueType :db.type/string}
+   :t2 {:db/valueType :db.type/string}
+   :uniq {:db/valueType :db.type/tuple
+          :db/unique :db.unique/identity
+          :db/tupleAttrs [:t1 :t2]}
+   
+   })
+
+  #_(def conn (d/get-conn "/tmp/dp5" schema))
 
   (d/close conn)
   )

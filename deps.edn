@@ -1,0 +1,19 @@
+{:paths ["src"]
+ :deps  {org.clojure/clojure {:mvn/version "1.11.4"}
+         ;; concurenncy
+         org.clojure/core.async {:mvn/version "1.6.681"}
+         ;; database
+         datalevin/datalevin {:mvn/version "0.9.8"}
+         ;; HTTP
+         cheshire/cheshire {:mvn/version "5.13.0"}
+         hato/hato {:mvn/version "0.9.0"}
+         org.babashka/http-client {:mvn/version "0.3.11"}
+         ;; cli
+         org.babashka/cli {:mvn/version "0.8.60"}}
+ :aliases
+ {:jvm-base {:jvm-opts [;; required by datalevin
+                        "--add-opens=java.base/java.nio=ALL-UNNAMED"
+                        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                        ;; lnd uses cert with "localhost"
+                        "-Djdk.internal.httpclient.disableHostnameVerification"]}
+  :neil {:project {:name com.noblepayne/alby-boost-scraper}}}}
