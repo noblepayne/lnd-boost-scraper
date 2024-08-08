@@ -431,7 +431,7 @@
              last-seen)))
 
 (defn get-boost-summary-for-report [conn show-regex last-seen]
-  (d/q '[:find [?ballers ?boosts ?thanks]
+  (d/q '[:find [?ballers ?boosts ?thanks ?summary ?stream_summary ?total_summary]
          :in $ ?regex ?last-seen
          :where
          ;; find all invoices since last-seen for show-regex
@@ -484,7 +484,7 @@
          ;; ballers
          [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'
                 :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'] ...]
-                :where [(<= 200000 ?sat_total')]]
+                :where [(<= 20000 ?sat_total')]]
                $ ?sats_by_eid_with_deets)
           ?ballers]
          ;; boosts
@@ -501,7 +501,63 @@
                 :where
                 [(< ?sat_total' 2000)]]
                $ ?sats_by_eid_with_deets)
-          ?thanks]]
+          ?thanks]
+         ;; boost summary
+         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
+                :in $ [[?e] ...]
+                :where
+                [?e :boostagram/value_sat_total ?sats]
+                [?e :boostagram/sender_name_normalized ?sender]]
+               $ ?valid_eids)
+          ?summary]
+         ;; stream summary
+         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
+                :in $ ?regex' ?last-seen'
+                :where
+                ;; find invoices after our last seen id
+                [?last :invoice/identifier ?last-seen']
+                [?last :invoice/creation_date ?last_creation_date]
+                [?e :invoice/creation_date ?creation_date]
+                [(< ?last_creation_date ?creation_date)]
+                ;; streams only
+                [?e :boostagram/action "stream"]
+                ;; filter out those troublemakers
+                (not [?e :boostagram/sender_name_normalized "chrislas"])
+                (not [?e :boostagram/sender_name_normalized "noblepayne"])
+                ;; match our particular show
+                [?e :boostagram/podcast ?podcast]
+                [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                (or [(re-matches ?regex' ?podcast) _]
+                    [(re-matches ?regex' ?episode) _])
+                ;; bind our vars to aggregate
+                [?e :boostagram/sender_name_normalized ?sender]
+                [?e :boostagram/value_sat_total ?sats]
+                ]
+               $ ?regex ?last-seen)
+          ?stream_summary]
+         ;; total summary
+         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
+                :in $ ?regex' ?last-seen'
+                :where
+                ;; find invoices after our last seen id
+                [?last :invoice/identifier ?last-seen']
+                [?last :invoice/creation_date ?last_creation_date]
+                [?e :invoice/creation_date ?creation_date]
+                [(< ?last_creation_date ?creation_date)]
+                ;; filter out those troublemakers
+                (not [?e :boostagram/sender_name_normalized "chrislas"])
+                (not [?e :boostagram/sender_name_normalized "noblepayne"])
+                ;; match our particular show
+                [?e :boostagram/podcast ?podcast]
+                [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                (or [(re-matches ?regex' ?podcast) _]
+                    [(re-matches ?regex' ?episode) _])
+                ;; bind our vars to aggregate
+                [?e :boostagram/sender_name_normalized ?sender]
+                [?e :boostagram/value_sat_total ?sats]
+                ]
+               $ ?regex ?last-seen)
+          ?total_summary]]
        (d/db conn) show-regex last-seen))
 
 (defn sort-report [[ballers boosts thanks]]
@@ -514,8 +570,6 @@
     {:ballers (sort-by :total #(compare %2 %1) (map sort-boosts ballers))
      :boosts (sort-by :mindate (map sort-boosts boosts))
      :thanks (sort-by :mindate (map sort-boosts thanks))}))
-
-#_(get-ballers-2 conn #"(?i).*linux.*" "450565")
 
 (defn get-normal-boosts [conn last-seen]
   (into (sorted-set-by
@@ -888,7 +942,9 @@
          [?e :invoice/identifier ?id]]
        (d/db conn))
 
-  (get-boost-summary-for-report conn #"(?i).*linux.*" "450565")
+  (->> "450565"
+       (get-boost-summary-for-report conn #"(?i).*linux.*")
+       #_sort-report)
 
 
   (def schema
