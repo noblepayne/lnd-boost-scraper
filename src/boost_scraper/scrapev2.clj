@@ -154,13 +154,13 @@
    :boostagram/action {:db/valueType :db.type/string}
    :boostagram/message {:db/valueType :db.type/string}
    #_:boostagram/dedup_id #_{:db/valueType :db.type/tuple
-                         :db/unique :db.unique/identity
-                         :db/tupleAttrs [:boostagram/sender_name_normalized
-                                         :boostagram/podcast
-                                         :boostagram/message
-                                         :boostagram/value_msat_total
-                                         :boostagram/action
-                                         :invoice/creation_date_per_30]}
+                             :db/unique :db.unique/identity
+                             :db/tupleAttrs [:boostagram/sender_name_normalized
+                                             :boostagram/podcast
+                                             :boostagram/message
+                                             :boostagram/value_msat_total
+                                             :boostagram/action
+                                             :invoice/creation_date_per_30]}
    :boostagram/value_msat_total {:db/valueType :db.type/long}
    :boostagram/value_sat_total {:db/valueType :db.type/long}}
     ;;
@@ -226,11 +226,11 @@
 
 (defn coerce-invoice-vals [invoice]
   (let [invoice (if-let [created_at (get invoice :invoice/created_at)]
-                      (assoc
-                       invoice
-                       :invoice/created_at
-                       (clojure.instant/read-instant-date created_at))
-                      invoice)
+                  (assoc
+                   invoice
+                   :invoice/created_at
+                   (clojure.instant/read-instant-date created_at))
+                  invoice)
         invoice (if-let [add_index (get invoice :invoice/add_index)]
                   (assoc
                    invoice
@@ -387,10 +387,283 @@
    0N
    boosts))
 
+;; WIP: new boost report query
+(def base-boost-q
+  '[;; find last seen boost
+    [?last-e :invoice/identifier ?last-seen]
+     ;; get its creation_date
+    [?last-e :invoice/creation_date ?last-creation_date]
+     ;; for every boost, get its creation date
+    [?e :invoice/creation_date ?creation_date]
+     ;; it must be after last creation date
+    [(< ?last-creation_date ?creation_date)]
+     ;; it should be a boost
+    [?e :boostagram/action "boost"]
+     ;; bind podcasts name
+    [?e :boostagram/podcast ?podcast]
+     ;; bind search pattern
+    [(re-pattern ".*Unplugged.*") ?regex]
+     ;; match show
+    (or [(re-matches ?regex ?podcast)]
+        [?e :boostagram/podcast "LINUX Unplugged"])])
+
+(defn get-ballers [conn last-seen]
+  (into (sorted-set-by
+         (fn [x1 x2]
+           (> (:boostagram/value_sat_total x1)
+              (:boostagram/value_sat_total x2))))
+        (comp cat (map #(into (sorted-map) %)))
+        (d/q {:find '[(pull ?e [:boostagram/app_name
+                                :boostagram/podcast
+                                :boostagram/episode
+                                #_:boostagram/sender_name
+                                :boostagram/sender_name_normalized
+                                #_:boostagram/value_msat_total
+                                :boostagram/value_sat_total
+                                :boostagram/message
+                                #_:invoice/comment
+                                :invoice/identifier
+                                :invoice/created_at])]
+              :in '[$ ?last-seen]
+              :where (into base-boost-q '[[?e :boostagram/value_sat_total ?ms]
+                                          [(<= 20000 ?ms)]])}
+             (d/db conn)
+             last-seen)))
+
+(defn get-ballers-2 [conn show-regex last-seen]
+  (d/q '[:find ?sender_name_normalized ?sat_total ?boost_count ?boosts
+         :in $ ?regex ?last-seen
+         :where
+         ;; find all invoices since last-seen for show-regex
+         [(d/q [:find ?e
+                :in $ ?regex' ?last-seen'
+                :where
+                ;; find invoices after our last seen id
+                [?last :invoice/identifier ?last-seen']
+                [?last :invoice/creation_date ?last_creation_date]
+                [?e :invoice/creation_date ?creation_date]
+                [(< ?last_creation_date ?creation_date)]
+                ;; boosts only
+                [?e :boostagram/action "boost"]
+                ;; filter out those troublemakers
+                (not [?e :boostagram/sender_name_normalized "chrislas"])
+                (not [?e :boostagram/sender_name_normalized "noblepayne"])
+                ;; match our particular show
+                [?e :boostagram/podcast ?podcast]
+                [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                (or [(re-matches ?regex' ?podcast) _]
+                    [(re-matches ?regex' ?episode) _])] 
+               $ ?regex ?last-seen) ;; subquery inputs
+          ?valid_eids] ;; subquery outputs
+         ;; compute sum of total sats and count of boosts per sender
+         [(d/q [:find ?sender_name_normalized (sum ?sats) (count ?e)
+                :in $ [[?e] ...]
+                :where
+                [?e :boostagram/sender_name_normalized ?sender_name_normalized]
+                [?e :boostagram/value_sat_total ?sats]]
+               $ ?valid_eids) ;; subquery inputs
+          ?sats_by_eid] ;; subquery outputs
+         ;; filter for sat total >= 20000
+         [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count'
+                :in [[?sender_name_normalized' ?sat_total' ?boost_count'] ...]
+                :where [(<= 20000 ?sat_total')]]
+               ?sats_by_eid) ;; subquery inputs
+          [[?sender_name_normalized ?sat_total ?boost_count] ...]] ;; subquery outputs
+         ;; boosts by sender (keeping filtering from initial subquery)
+         [(d/q [:find [(d/pull ?e [:boostagram/sender_name_normalized
+                                   :boostagram/value_sat_total]) ...]
+                :in $ [[?e] ...] ?sender_name_normalized'
+                :where
+                [?e :boostagram/sender_name_normalized ?sender_name_normalized']]
+               $ ?valid_eids ?sender_name_normalized) ;; subquery inputs
+          ?boosts]] ;; subquery outputs
+       (d/db conn) show-regex last-seen)) ;; top level query inputs
+
+
+(defn get-normal-boosts [conn last-seen]
+  (into (sorted-set-by
+         (fn [x1 x2]
+           (compare (:invoice/created_at x1)
+                    (:invoice/created_at x2))))
+        (comp cat (map #(into (sorted-map) %)))
+        (d/q {:find '[(pull ?e [:boostagram/app_name
+                                :boostagram/podcast
+                                :boostagram/episode
+                                #_:boostagram/sender_name
+                                :boostagram/sender_name_normalized
+                                #_:boostagram/value_msat_total
+                                :boostagram/value_sat_total
+                                :boostagram/message
+                                #_:invoice/comment
+                                :invoice/identifier
+                                :invoice/created_at])]
+              :in '[$ ?last-seen]
+              :where (into base-boost-q '[[?e :boostagram/value_sat_total ?ms]
+                                          [(<=  2000 ?ms)]
+                                          [(< ?ms 20000)]])}
+             (d/db conn)
+             last-seen)))
+
+(defn get-thanks [conn last-seen]
+  (into (sorted-set-by
+         (fn [x1 x2]
+           (compare (:invoice/created_at x1)
+                    (:invoice/created_at x2))))
+        (comp cat (map #(into (sorted-map) %)))
+        (d/q {:find '[(pull ?e [:boostagram/app_name
+                                :boostagram/podcast
+                                :boostagram/episode
+                                #_:boostagram/sender_name
+                                :boostagram/sender_name_normalized
+                                #_:boostagram/value_msat_total
+                                :boostagram/value_sat_total
+                                :boostagram/message
+                                #_:invoice/comment
+                                :invoice/identifier
+                                :invoice/created_at])]
+              :in '[$ ?last-seen]
+              :where (into base-boost-q '[[?e :boostagram/value_sat_total ?ms]
+                                          [(< ?ms 2000)]])}
+             (d/db conn)
+             last-seen)))
+
+
+(defn get-summary [conn last-seen]
+  (d/q {:find '[(sum ?s) (count ?e) (count-distinct ?b)]
+        :in '[$ ?last-seen]
+        :where (into base-boost-q '[[?e :boostagram/value_sat_total ?s]
+                                    [?e :boostagram/sender_name_normalized ?b]])}
+       (d/db conn)
+       last-seen))
+
+(defn get-stream-summary [conn show-regex last-seen]
+  (into [] cat
+        (d/q {:find '[(sum ?s) (count ?e) (count-distinct ?b) (distinct ?b)]
+              :in '[$ ?regex ?last-seen]
+              :where '[[?last-e :invoice/identifier ?last-seen]
+                       [?last-e :invoice/creation_date ?last-creation_date]
+                       [?e :invoice/creation_date ?creation_date]
+                       [(< ?last-creation_date ?creation_date)]
+                       [?e :boostagram/action "stream"]
+                       [?e :boostagram/podcast ?podcast]
+                       [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                       (or
+                        [(re-matches ?regex ?episode) _]
+                        [(re-matches ?regex ?podcast) _])
+                       [?e :boostagram/value_sat_total ?s]
+                       [?e :boostagram/sender_name_normalized ?b]]}
+             (d/db conn)
+             show-regex
+             last-seen)))
+
+(defn get-all-boosts-since [conn last-seen]
+  (into (sorted-set-by
+         (fn [x1 x2]
+           (compare (:invoice/created_at x1)
+                    (:invoice/created_at x2))))
+        (comp cat (map #(into (sorted-map) %)))
+        (d/q {:find '[(pull ?e [:boostagram/app_name
+                                :boostagram/podcast
+                                :boostagram/episode
+                                #_:boostagram/sender_name
+                                :boostagram/sender_name_normalized
+                                :boostagram/value_msat_total
+                                :boostagram/value_sat_total
+                                :boostagram/message
+                                #_:invoice/comment
+                                :invoice/identifier
+                                :invoice/created_at
+                                :invoice/creation_date])]
+              :in '[$ ?last-seen]
+              :where base-boost-q}
+             (d/db conn)
+             last-seen)))
+
+
+(defn get-lnd-boosts-from-db [conn show-regex last-seen-idx]
+  (into (sorted-set-by (fn [& args] (apply compare (reverse (map :invoice/creation_date args)))))
+        (comp cat
+              #_(take 10)
+                ;; sort keys of each boost
+              (map #(into (sorted-map) %)))
+        (d/q '[:find (d/pull ?e #_[:*] [:boostagram/app_name
+                                        :boostagram/podcast
+                                        :boostagram/episode
+                                        :boostagram/sender_name_normalized
+                                        :boostagram/value_msat_total
+                                        :boostagram/value_sat_total
+                                        :boostagram/message
+                                        :invoice/identifier
+                                        :invoice/created_at
+                                        :invoice/creation_date])
+               :in $ ?regex ?last-seen-idx
+               :where
+                 ;; only find boosts
+               [?e :boostagram/action "boost"]
+                 ;; with creation_date's after our "since" marker
+               [?e :invoice/creation_date ?cd]
+               [?e0 :invoice/identifier ?last-seen-idx]
+               [?e0 :invoice/creation_date ?cd0]
+               [(< ?cd0 ?cd)]
+               #_[(< ?last-seen-idx ?cd)]
+                 ;; match podcast and episode to find all episodes of `show`
+               [?e :boostagram/podcast ?podcast]
+               [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+               (or
+                [(re-matches ?regex ?podcast) _]
+                [(re-matches ?regex ?episode) _])]
+             (d/db conn)
+             show-regex
+             last-seen-idx)))
+
+(defn v2->v1 [v2-boosts]
+  (->> v2-boosts
+         ;; remove namespaces from keys
+       (mapv
+        (fn [boost]
+          (into {}
+                (map (fn [[k v]]
+                       [(keyword (name k)) v]))
+                boost)))
+         ;; rename :sender_name_normalized -> :sender_name
+       (mapv
+        (fn [boost]
+          (into {}
+                (map (fn [[k v]]
+                       [(if (= k :sender_name_normalized) :sender_name k) v]))
+                boost)))))
+
+(defn boost-report-v2 [conn show-regex last-seen-index]
+  (->> (get-lnd-boosts-from-db conn show-regex last-seen-index)
+       v2->v1
+       v1/boost-report
+       #_(#(with-out-str (clojure.pprint/pprint %)))
+       (spit "/tmp/new_boosts.md")))
+
+(defn make-stream-summary [conn show-regex last-seen]
+  (let [[sats streams streamers] (get-stream-summary conn show-regex last-seen)]
+    (str "### Stream Totals\n"
+         "+ Total Sats: " (v1/int-comma sats) "\n"
+         "+ Total Streams: " (v1/int-comma streams) "\n"
+         "+ Unique Streamers: " (v1/int-comma streamers) "\n")))
+
+
 (alter-var-root #'*out* (constantly *out*))
 
 (defn -main [& args]
-  (println args))
+  (let [conn (d/get-conn dbi schema)
+        macaroon
+        (-> "/home/wes/src/lnd_workdir/admin.macaroon"
+            (as-> $
+                  (.getPath (java.nio.file.FileSystems/getDefault) $ (into-array String [])))
+            java.nio.file.Files/readAllBytes
+            javax.xml.bind.DatatypeConverter/printHexBinary
+            (#(.toLowerCase %)))]
+    (.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (println "closing") (reset! scrape-can-run false) (d/close conn))))
+    (while true
+      (scrape-lnd-boosts conn macaroon 500)
+      (Thread/sleep 60000))
+    (println args)))
 
 (comment
 
@@ -508,219 +781,14 @@
          :where [?e :boostagram/podcast "Mere Mortals"]]
        (d/db conn))
 
-  ;; WIP: new boost report query
-
-  (def base-boost-q
-    '[;; find last seen boost
-      [?last-e :invoice/identifier ?last-seen]
-     ;; get its creation_date
-      [?last-e :invoice/creation_date ?last-creation_date]
-     ;; for every boost, get its creation date
-      [?e :invoice/creation_date ?creation_date]
-     ;; it must be after last creation date
-      [(< ?last-creation_date ?creation_date)]
-     ;; it should be a boost
-      [?e :boostagram/action "boost"]
-     ;; bind podcasts name
-      [?e :boostagram/podcast ?podcast]
-     ;; bind search pattern
-      [(re-pattern ".*Unplugged.*") ?regex]
-     ;; match show
-      (or [(re-matches ?regex ?podcast)]
-          [?e :boostagram/podcast "LINUX Unplugged"])])
-
-  (defn get-ballers [conn last-seen]
-    (into (sorted-set-by
-           (fn [x1 x2]
-             (> (:boostagram/value_sat_total x1)
-                (:boostagram/value_sat_total x2))))
-          (comp cat (map #(into (sorted-map) %)))
-          (d/q {:find '[(pull ?e [:boostagram/app_name
-                                  :boostagram/podcast
-                                  :boostagram/episode
-                                  #_:boostagram/sender_name
-                                  :boostagram/sender_name_normalized
-                                  #_:boostagram/value_msat_total
-                                  :boostagram/value_sat_total
-                                  :boostagram/message
-                                  #_:invoice/comment
-                                  :invoice/identifier
-                                  :invoice/created_at])]
-                :in '[$ ?last-seen]
-                :where (into base-boost-q '[[?e :boostagram/value_sat_total ?ms]
-                                            [(<= 20000 ?ms)]])}
-               (d/db conn)
-               last-seen)))
-
-  (defn get-normal-boosts [conn last-seen]
-    (into (sorted-set-by
-           (fn [x1 x2]
-             (compare (:invoice/created_at x1)
-                      (:invoice/created_at x2))))
-          (comp cat (map #(into (sorted-map) %)))
-          (d/q {:find '[(pull ?e [:boostagram/app_name
-                                  :boostagram/podcast
-                                  :boostagram/episode
-                                  #_:boostagram/sender_name
-                                  :boostagram/sender_name_normalized
-                                  #_:boostagram/value_msat_total
-                                  :boostagram/value_sat_total
-                                  :boostagram/message
-                                  #_:invoice/comment
-                                  :invoice/identifier
-                                  :invoice/created_at])]
-                :in '[$ ?last-seen]
-                :where (into base-boost-q '[[?e :boostagram/value_sat_total ?ms]
-                                            [(<=  2000 ?ms)]
-                                            [(< ?ms 20000)]])}
-               (d/db conn)
-               last-seen)))
-
-  (defn get-thanks [conn last-seen]
-    (into (sorted-set-by
-           (fn [x1 x2]
-             (compare (:invoice/created_at x1)
-                      (:invoice/created_at x2))))
-          (comp cat (map #(into (sorted-map) %)))
-          (d/q {:find '[(pull ?e [:boostagram/app_name
-                                  :boostagram/podcast
-                                  :boostagram/episode
-                                  #_:boostagram/sender_name
-                                  :boostagram/sender_name_normalized
-                                  #_:boostagram/value_msat_total
-                                  :boostagram/value_sat_total
-                                  :boostagram/message
-                                  #_:invoice/comment
-                                  :invoice/identifier
-                                  :invoice/created_at])]
-                :in '[$ ?last-seen]
-                :where (into base-boost-q '[[?e :boostagram/value_sat_total ?ms]
-                                            [(< ?ms 2000)]])}
-               (d/db conn)
-               last-seen)))
 
 
-  (defn get-summary [conn last-seen]
-    (d/q {:find '[(sum ?s) (count ?e) (count-distinct ?b)]
-          :in '[$ ?last-seen]
-          :where (into base-boost-q '[[?e :boostagram/value_sat_total ?s]
-                                      [?e :boostagram/sender_name_normalized ?b]])}
-         (d/db conn)
-         last-seen))
-
-  (defn get-stream-summary [conn last-seen]
-    (into [] cat
-          (d/q {:find '[(sum ?s) (count ?e) (count-distinct ?b) (distinct ?b)]
-                :in '[$ ?last-seen]
-                :where '[[?last-e :invoice/identifier ?last-seen]
-                         [?last-e :invoice/creation_date ?last-creation_date]
-                         [?e :invoice/creation_date ?creation_date]
-                         [(< ?last-creation_date ?creation_date)]
-                         [?e :boostagram/action "stream"]
-                         [?e :boostagram/podcast ?podcast]
-                         [(re-pattern ".*Unplugged.*") ?regex]
-                         (or [(re-matches ?regex ?podcast)]
-                             [?e :boostagram/podcast "LINUX Unplugged"])
-                         [?e :boostagram/value_sat_total ?s]
-                         [?e :boostagram/sender_name_normalized ?b]]}
-               (d/db conn)
-               last-seen)))
-
-  (defn get-all-boosts-since [conn last-seen]
-    (into (sorted-set-by
-           (fn [x1 x2]
-             (compare (:invoice/created_at x1)
-                      (:invoice/created_at x2))))
-          (comp cat (map #(into (sorted-map) %)))
-          (d/q {:find '[(pull ?e [:boostagram/app_name
-                                  :boostagram/podcast
-                                  :boostagram/episode
-                                  #_:boostagram/sender_name
-                                  :boostagram/sender_name_normalized
-                                  :boostagram/value_msat_total
-                                  :boostagram/value_sat_total
-                                  :boostagram/message
-                                  #_:invoice/comment
-                                  :invoice/identifier
-                                  :invoice/created_at
-                                  :invoice/creation_date])]
-                :in '[$ ?last-seen]
-                :where base-boost-q}
-               (d/db conn)
-               last-seen)))
-
-
-  (defn get-lnd-boosts-from-db [conn show-regex last-seen-idx]
-    (into (sorted-set-by (fn [& args] (apply compare (reverse (map :invoice/creation_date args)))))
-          (comp cat
-                #_(take 10)
-                ;; sort keys of each boost
-                (map #(into (sorted-map) %)))
-          (d/q '[:find (d/pull ?e [:*] #_[:boostagram/app_name
-                                   :boostagram/podcast
-                                   :boostagram/episode
-                                   :boostagram/sender_name_normalized
-                                   :boostagram/value_msat_total
-                                   :boostagram/value_sat_total
-                                   :boostagram/message
-                                   :invoice/identifier
-                                   :invoice/created_at
-                                   :invoice/creation_date])
-                 :in $ ?regex ?last-seen-idx
-                 :where
-                 ;; only find boosts
-                 [?e :boostagram/action "boost"]
-                 ;; with creation_date's after our "since" marker
-                 [?e :invoice/creation_date ?cd]
-                 #_[?e0 :invoice/identifier ?last-seen-idx]
-                 #_[?e0 :invoice/creation_date ?cd0] 
-                 #_[(< ?cd0 ?cd)]
-                 [(< ?last-seen-idx ?cd)]
-                 ;; match podcast and episode to find all episodes of `show`
-                 [?e :boostagram/podcast ?podcast]
-                 [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
-                 (or
-                  [(re-matches ?regex ?podcast) _]
-                  [(re-matches ?regex ?episode) _])]
-               (d/db conn)
-               show-regex
-               last-seen-idx)))
-
-  (defn v2->v1 [v2-boosts]
-    (->> v2-boosts
-         ;; remove namespaces from keys
-         (mapv
-          (fn [boost]
-            (into {}
-                  (map (fn [[k v]]
-                         [(keyword (name k)) v]))
-                  boost))) 
-         ;; rename :sender_name_normalized -> :sender_name
-         (mapv
-          (fn [boost]
-            (into {}
-                  (map (fn [[k v]]
-                         [(if (= k :sender_name_normalized) :sender_name k) v]))
-                  boost)))))
-
-  (defn boost-report-v2 [conn show-regex last-seen-index]
-    (->> (get-lnd-boosts-from-db conn show-regex last-seen-index)
-         #_v2->v1
-         #_v1/boost-report
-         (#(with-out-str (clojure.pprint/pprint %)))
-         (spit "/tmp/new_boosts.md")))
-  
   (boost-report-v2 conn #"(?i).*linux.*" (-> #inst "2024-07-01T00:00Z" (#(.getTime %)) (/ 1000)))
   (boost-report-v2 conn #"(?i).*self.*" "443250")
 
-  (defn make-stream-summary [conn last-seen]
-    (let [[sats streams streamers] (get-stream-summary conn last-seen)]
-      (str "### Stream Totals\n"
-           "+ Total Sats: " (v1/int-comma sats) "\n"
-           "+ Total Streams: " (v1/int-comma streams) "\n"
-           "+ Unique Streamers: " (v1/int-comma streamers) "\n")))
+  (boost-report-v2 conn #"(?i).*linux.*" "450565")
 
-  (make-stream-summary conn "A4CHBDDTNjxsPSdZXh56VbeE")
+  (make-stream-summary conn #"(?i).*self.*" "443250")
 
   (let [[[output]]
         (d/q '[:find (min ?i)
@@ -773,16 +841,27 @@
                         (scrape-lnd-boosts conn macaroon 500)))
    (fn [x] (println "========== DONE ==========" x)))
 
-(def schema
-  {:invoice/identifier {:db/valueType :db.type/string
-                        :db/unique :db.unique/identity}
-   :t1 {:db/valueType :db.type/string}
-   :t2 {:db/valueType :db.type/string}
-   :uniq {:db/valueType :db.type/tuple
-          :db/unique :db.unique/identity
-          :db/tupleAttrs [:t1 :t2]}
-   
-   })
+  (d/q '[:find [?id]
+         :where
+         [(d/q [:find [(min ?cd)]
+                :where
+                [?e2 :boostagram/action "boost"]
+                [?e2 :invoice/creation_date ?cd]] $) [?mincd]]
+         [?e :invoice/creation_date ?mincd]
+         [?e :invoice/identifier ?id]]
+       (d/db conn))
+
+  (get-ballers-2 conn #"(?i).*linux.*" "450565")
+
+
+  (def schema
+    {:invoice/identifier {:db/valueType :db.type/string
+                          :db/unique :db.unique/identity}
+     :t1 {:db/valueType :db.type/string}
+     :t2 {:db/valueType :db.type/string}
+     :uniq {:db/valueType :db.type/tuple
+            :db/unique :db.unique/identity
+            :db/tupleAttrs [:t1 :t2]}})
 
   #_(def conn (d/get-conn "/tmp/dp5" schema))
 
