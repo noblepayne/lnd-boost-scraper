@@ -430,8 +430,8 @@
              (d/db conn)
              last-seen)))
 
-(defn get-ballers-2 [conn show-regex last-seen]
-  (d/q '[:find ?sender_name_normalized ?sat_total ?boost_count ?boosts
+(defn get-boost-summary-for-report [conn show-regex last-seen]
+  (d/q '[:find [?ballers ?boosts ?thanks]
          :in $ ?regex ?last-seen
          :where
          ;; find all invoices since last-seen for show-regex
@@ -452,33 +452,70 @@
                 [?e :boostagram/podcast ?podcast]
                 [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
                 (or [(re-matches ?regex' ?podcast) _]
-                    [(re-matches ?regex' ?episode) _])] 
-               $ ?regex ?last-seen) ;; subquery inputs
-          ?valid_eids] ;; subquery outputs
-         ;; compute sum of total sats and count of boosts per sender
-         [(d/q [:find ?sender_name_normalized (sum ?sats) (count ?e)
+                    [(re-matches ?regex' ?episode) _])]
+               $ ?regex ?last-seen)
+          ?valid_eids]
+         ;; aggregate boosts by sender_name_normalized
+         [(d/q [:find ?sender_name_normalized (sum ?sats) (count ?e) (min ?d) (distinct ?e)
                 :in $ [[?e] ...]
                 :where
                 [?e :boostagram/sender_name_normalized ?sender_name_normalized]
-                [?e :boostagram/value_sat_total ?sats]]
-               $ ?valid_eids) ;; subquery inputs
-          ?sats_by_eid] ;; subquery outputs
-         ;; filter for sat total >= 20000
-         [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count'
-                :in [[?sender_name_normalized' ?sat_total' ?boost_count'] ...]
-                :where [(<= 20000 ?sat_total')]]
-               ?sats_by_eid) ;; subquery inputs
-          [[?sender_name_normalized ?sat_total ?boost_count] ...]] ;; subquery outputs
-         ;; boosts by sender (keeping filtering from initial subquery)
-         [(d/q [:find [(d/pull ?e [:boostagram/sender_name_normalized
-                                   :boostagram/value_sat_total]) ...]
-                :in $ [[?e] ...] ?sender_name_normalized'
+                [?e :boostagram/value_sat_total ?sats]
+                [?e :invoice/creation_date ?d]]
+               $ ?valid_eids)
+          ?sats_by_eid]
+         ;; pull individual boost data for each sender
+         [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts
+                :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boost_ids] ...]
                 :where
-                [?e :boostagram/sender_name_normalized ?sender_name_normalized']]
-               $ ?valid_eids ?sender_name_normalized) ;; subquery inputs
-          ?boosts]] ;; subquery outputs
-       (d/db conn) show-regex last-seen)) ;; top level query inputs
+                [(d/q [:find [(d/pull ?e' [:boostagram/sender_name_normalized
+                                           :boostagram/value_sat_total
+                                           :boostagram/podcast
+                                           :boostagram/episode
+                                           :boostagram/app_name
+                                           :invoice/created_at
+                                           :boostagram/message]) ...]
+                       :in $ [?e' ...]]
+                      $ ?boost_ids)
+                 ?boosts]]
+               $ ?sats_by_eid)
+          ?sats_by_eid_with_deets]
+         ;;;; filter by report section
+         ;; ballers
+         [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'
+                :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'] ...]
+                :where [(<= 200000 ?sat_total')]]
+               $ ?sats_by_eid_with_deets)
+          ?ballers]
+         ;; boosts
+         [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'
+                :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'] ...]
+                :where
+                [(<= 2000 ?sat_total')]
+                [(< ?sat_total' 20000)]]
+               $ ?sats_by_eid_with_deets)
+          ?boosts]
+         ;; thanks
+         [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'
+                :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'] ...]
+                :where
+                [(< ?sat_total' 2000)]]
+               $ ?sats_by_eid_with_deets)
+          ?thanks]]
+       (d/db conn) show-regex last-seen))
 
+(defn sort-report [[ballers boosts thanks]]
+  (letfn [(sort-boosts [[sender total count mindate boosts]]
+            {:sender sender
+             :total total
+             :count count
+             :mindate mindate
+             :boosts (sort-by :invoice/created_at boosts)})]
+    {:ballers (sort-by :total #(compare %2 %1) (map sort-boosts ballers))
+     :boosts (sort-by :mindate (map sort-boosts boosts))
+     :thanks (sort-by :mindate (map sort-boosts thanks))}))
+
+#_(get-ballers-2 conn #"(?i).*linux.*" "450565")
 
 (defn get-normal-boosts [conn last-seen]
   (into (sorted-set-by
@@ -851,7 +888,7 @@
          [?e :invoice/identifier ?id]]
        (d/db conn))
 
-  (get-ballers-2 conn #"(?i).*linux.*" "450565")
+  (get-boost-summary-for-report conn #"(?i).*linux.*" "450565")
 
 
   (def schema
@@ -865,5 +902,4 @@
 
   #_(def conn (d/get-conn "/tmp/dp5" schema))
 
-  (d/close conn)
-  )
+  (d/close conn))
