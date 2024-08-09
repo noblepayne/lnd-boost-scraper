@@ -38,7 +38,7 @@
       (.atZone (java.time.ZoneId/of "America/Los_Angeles"))
       (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy/MM/dd h:mm:ss a zzz"))))
 
-(defn int-comma [n] (clojure.pprint/cl-format nil "~:d"  (float n)))
+(defn int-comma [n] (clojure.pprint/cl-format nil "~:d"  (float (or n 0))))
 
 (defn get-new-auth-token [basic-auth-secret refresh-token]
   (-> alby-token-refresh-url
@@ -474,6 +474,8 @@
                                            :boostagram/episode
                                            :boostagram/app_name
                                            :invoice/created_at
+                                           :invoice/creation_date
+                                           :invoice/identifier
                                            :boostagram/message]) ...]
                        :in $ [?e' ...]]
                       $ ?boost_ids)
@@ -503,7 +505,7 @@
                $ ?sats_by_eid_with_deets)
           ?thanks]
          ;; boost summary
-         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
+         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
                 :in $ [[?e] ...]
                 :where
                 [?e :boostagram/value_sat_total ?sats]
@@ -511,7 +513,7 @@
                $ ?valid_eids)
           ?summary]
          ;; stream summary
-         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
+         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
                 :in $ ?regex' ?last-seen'
                 :where
                 ;; find invoices after our last seen id
@@ -536,7 +538,7 @@
                $ ?regex ?last-seen)
           ?stream_summary]
          ;; total summary
-         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
+         [(d/q [:find [(sum ?sats) (max ?creation_date) (count-distinct ?sender)]
                 :in $ ?regex' ?last-seen'
                 :where
                 ;; find invoices after our last seen id
@@ -554,13 +556,26 @@
                     [(re-matches ?regex' ?episode) _])
                 ;; bind our vars to aggregate
                 [?e :boostagram/sender_name_normalized ?sender]
-                [?e :boostagram/value_sat_total ?sats]
-                ]
+                [?e :boostagram/value_sat_total ?sats]]
                $ ?regex ?last-seen)
-          ?total_summary]]
+          ?total_summary_p1]
+          ;; TODO needed? find ID corresponding to max timestamp
+          [(d/q [:find [?total_sat_sum ?last_seen_id ?distinct_senders]
+                 :in $ [?total_sat_sum ?last_cd ?distinct_senders]
+                 :where
+                 [?e :invoice/creation_date ?last_cd]
+                 [?e :invoice/identifier ?last_seen_id]]
+                $ ?total_summary_p1)
+           ?total_summary]]
        (d/db conn) show-regex last-seen))
 
-(defn sort-report [[ballers boosts thanks]]
+(defn sort-report
+  [[ballers
+    boosts
+    thanks
+    [boost_total_sats boost_total_boosts boost_total_boosters]
+    [stream_total_sats stream_total_streams stream_total_streamers]
+    [total_sats last_seen_id total_unique_boosters]]]
   (letfn [(sort-boosts [[sender total count mindate boosts]]
             {:sender sender
              :total total
@@ -569,7 +584,76 @@
              :boosts (sort-by :invoice/created_at boosts)})]
     {:ballers (sort-by :total #(compare %2 %1) (map sort-boosts ballers))
      :boosts (sort-by :mindate (map sort-boosts boosts))
-     :thanks (sort-by :mindate (map sort-boosts thanks))}))
+     :thanks (sort-by :mindate (map sort-boosts thanks))
+     :boost-summary {:boost_total_sats boost_total_sats
+                     :boost_total_boosts boost_total_boosts
+                     :boost_total_boosters boost_total_boosters}
+     :stream-summary {:stream_total_sats stream_total_sats
+                      :stream_total_streams stream_total_streams
+                      :stream_total_streamers stream_total_streamers}
+     :summary {:total_sats total_sats
+               :last_seen_id last_seen_id
+               :total_unique_boosters total_unique_boosters}}))
+
+(defn format-boost-batch [[boost & batch]]
+  (str/join
+   "\n"
+   (concat
+    (let [{:keys [boostagram/message
+                  boostagram/value_sat_total
+                  boostagram/podcast
+                  boostagram/episode
+                  boostagram/app_name
+                  invoice/identifier
+                  invoice/creation_date]} boost]
+      [(str "+ " podcast "\n"
+            "+ " episode "\n"
+            "+ " app_name "\n"
+            "+ " (format-date creation_date) "\n"
+            "+ " identifier "\n"
+            "\n"
+            "+ " (int-comma value_sat_total) " sats\n"
+            (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))])
+    (for [{:keys [boostagram/message boostagram/value_sat_total]} batch]
+      (str "\n"
+           "+ " (int-comma value_sat_total) " sats\n"
+           (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))))))
+
+(defn format-boost [{:keys [sender total count boosts]}]
+  (str "### From: " sender "\n"
+       "+ " (int-comma total) " sats\n"
+       "+ " (int-comma count) " boosts\n"
+       (format-boost-batch boosts)
+       "\n"))
+
+(defn format-boosts [boosts]
+  (str/join "\n" (map format-boost boosts)))
+
+(defn format-sorted-report
+  [{:keys [ballers boosts thanks boost-summary stream-summary summary]}]
+  (str "## Baller Boosts\n"
+       (format-boosts ballers)
+       "## Boosts\n"
+       (format-boosts boosts)
+       "## Thanks\n"
+       (format-boosts thanks)
+       "\n## Boost Summary"
+       "\n+ Total Sats: " (int-comma (:boost_total_sats boost-summary))
+       "\n+ Total Boosts: " (int-comma (:boost_total_boosts boost-summary))
+       "\n+ Total Boosters: " (int-comma (:boost_total_boosters boost-summary))
+       "\n"
+       "\n## Stream Summary"
+       "\n+ Total Sats: " (int-comma (:stream_total_sats stream-summary))
+       "\n+ Total Streams: " (int-comma (:stream_total_streams stream-summary))
+       "\n+ Total Streamers: " (int-comma (:stream_total_streamers stream-summary))
+       "\n"
+       "\n## Summary"
+       "\n+ Total Sats: " (int-comma (:total_sats summary))
+       "\n+ Total Boosters: " (int-comma (:total_unique_boosters summary))
+       "\n"
+       "\n## Last Seen"
+       "\n+ Last seen ID: " (:last_seen_id summary)
+       "\n"))
 
 (defn get-normal-boosts [conn last-seen]
   (into (sorted-set-by
@@ -943,8 +1027,10 @@
        (d/db conn))
 
   (->> "450565"
-       (get-boost-summary-for-report conn #"(?i).*linux.*")
-       #_sort-report)
+       (get-boost-summary-for-report conn #"(?i).*unplugged.*")
+       sort-report
+       format-sorted-report
+       (spit "/tmp/boost_test.md"))
 
 
   (def schema
