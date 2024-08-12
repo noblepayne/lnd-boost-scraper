@@ -119,8 +119,11 @@
              (filter :creation_date)
              (map :creation_date)
              sort
-             first
-             (#(println "stamp: " % "   " (format-date (or (Integer/parseInt %) 0)))))
+             ;; FIXME: cleanup/better observability
+             #_first
+             (#(vector (first %) (last %)))
+             (#(do (println "stamp: " (peek %) "   " (format-date (Integer/parseInt (or (peek %) "0")))) %))
+             (#(do (println "stamp: " (first %) "   " (format-date (Integer/parseInt (or (first %) "0")))) %)))
         (catch Exception e (println "OH NO: " e)))
       (when wait
         (println "waiting...")
@@ -595,7 +598,7 @@
                :last_seen_id last_seen_id
                :total_unique_boosters total_unique_boosters}}))
 
-(defn format-boost-batch [[boost & batch]]
+(defn format-boost-batch-details [[boost & batch]]
   (str/join
    "\n"
    (concat
@@ -609,34 +612,39 @@
       [(str "+ " podcast "\n"
             "+ " episode "\n"
             "+ " app_name "\n"
-            "+ " (format-date creation_date) "\n"
             "+ " identifier "\n"
             "\n"
+            "+ " (format-date creation_date) "\n"
             "+ " (int-comma value_sat_total) " sats\n"
             (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))])
-    (for [{:keys [boostagram/message boostagram/value_sat_total]} batch]
+    (for [{:keys [boostagram/message boostagram/value_sat_total
+                  invoice/creation_date
+                  #_invoice/identifier
+                  ]} batch]
       (str "\n"
+           #_("+ " identifier "\n")
+           "+ " (format-date creation_date) "\n"
            "+ " (int-comma value_sat_total) " sats\n"
            (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))))))
 
-(defn format-boost [{:keys [sender total count boosts]}]
+(defn format-boost-batch [{:keys [sender total count boosts]}]
   (str "### From: " sender "\n"
        "+ " (int-comma total) " sats\n"
        "+ " (int-comma count) " boosts\n"
-       (format-boost-batch boosts)
+       (format-boost-batch-details boosts)
        "\n"))
 
-(defn format-boosts [boosts]
-  (str/join "\n" (map format-boost boosts)))
+(defn format-boost-section [boosts]
+  (str/join "\n" (map format-boost-batch boosts)))
 
 (defn format-sorted-report
   [{:keys [ballers boosts thanks boost-summary stream-summary summary]}]
   (str "## Baller Boosts\n"
-       (format-boosts ballers)
+       (format-boost-section ballers)
        "## Boosts\n"
-       (format-boosts boosts)
+       (format-boost-section boosts)
        "## Thanks\n"
-       (format-boosts thanks)
+       (format-boost-section thanks)
        "\n## Boost Summary"
        "\n+ Total Sats: " (int-comma (:boost_total_sats boost-summary))
        "\n+ Total Boosts: " (int-comma (:boost_total_boosts boost-summary))
@@ -1026,7 +1034,7 @@
          [?e :invoice/identifier ?id]]
        (d/db conn))
 
-  (->> "450565"
+  (->> "450692"
        (get-boost-summary-for-report conn #"(?i).*unplugged.*")
        sort-report
        format-sorted-report

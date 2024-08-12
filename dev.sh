@@ -1,2 +1,2 @@
 #!/usr/bin/env sh
-nix develop --impure
+nix develop --impure path:.
