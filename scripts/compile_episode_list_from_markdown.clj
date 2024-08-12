@@ -23,9 +23,9 @@
 
 (defn extract-number [filename]
   (-> filename
-       (clojure.string/replace #"[^\d]" "")
-       (Integer.)
-       str))
+      (clojure.string/replace #"[^\d]" "")
+      (Integer.)
+      str))
 
 (defn run [dir]
   (let [markdown-files (into (sorted-set) (get-markdown-files dir))
@@ -41,5 +41,4 @@
         (println)))))
 
 (comment
-  (run ".")
-  )
+  (run "."))

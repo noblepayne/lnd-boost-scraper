@@ -1,20 +1,15 @@
-(ns boost-scraper.scrapev2
+(ns boost-scraper.core
   (:gen-class)
   (:require [babashka.http-client :as http]
             [cheshire.core :as json]
             [babashka.cli :as cli]
             [clojure.core.async :as async]
-            #_[babashka.pods :as pods]
             [datalevin.core :as d]
             [clojure.java.io :as io]
             [clojure.instant]
             [clojure.string :as str]
             [clojure.pprint :as pprint]
-            [clojure.edn :as edn]
-            [boost-scraper.scrape :as v1]))
-
-#_(pods/load-pod 'huahaiy/datalevin "0.8.25")
-#_(require '[pod.huahaiy.datalevin :as d])
+            [clojure.edn :as edn]))
 
 (def alby-incoming-invoices-url "https://api.getalby.com/invoices/incoming")
 (def alby-token-refresh-url "https://api.getalby.com/oauth/token")
@@ -86,7 +81,6 @@
         (Thread/sleep wait))
       #_(reset! get-boosts-state (:next next_))
       next_)))
-
 
 (defn get-all-boosts [token items-per-page & get-boost-args]
   (iteration get-boosts
@@ -300,7 +294,6 @@
        (map process-batch)
        (run! (fn [x]
                (d/transact! conn x)))))
-
 
 (defn scrape-boosts-after [conn token items-per-page wait after]
   (->> (get-all-boosts token items-per-page :wait wait :after after)
@@ -536,8 +529,7 @@
                     [(re-matches ?regex' ?episode) _])
                 ;; bind our vars to aggregate
                 [?e :boostagram/sender_name_normalized ?sender]
-                [?e :boostagram/value_sat_total ?sats]
-                ]
+                [?e :boostagram/value_sat_total ?sats]]
                $ ?regex ?last-seen)
           ?stream_summary]
          ;; total summary
@@ -563,13 +555,13 @@
                $ ?regex ?last-seen)
           ?total_summary_p1]
           ;; TODO needed? find ID corresponding to max timestamp
-          [(d/q [:find [?total_sat_sum ?last_seen_id ?distinct_senders]
-                 :in $ [?total_sat_sum ?last_cd ?distinct_senders]
-                 :where
-                 [?e :invoice/creation_date ?last_cd]
-                 [?e :invoice/identifier ?last_seen_id]]
-                $ ?total_summary_p1)
-           ?total_summary]]
+         [(d/q [:find [?total_sat_sum ?last_seen_id ?distinct_senders]
+                :in $ [?total_sat_sum ?last_cd ?distinct_senders]
+                :where
+                [?e :invoice/creation_date ?last_cd]
+                [?e :invoice/identifier ?last_seen_id]]
+               $ ?total_summary_p1)
+          ?total_summary]]
        (d/db conn) show-regex last-seen))
 
 (defn sort-report
@@ -619,8 +611,7 @@
             (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))])
     (for [{:keys [boostagram/message boostagram/value_sat_total
                   invoice/creation_date
-                  #_invoice/identifier
-                  ]} batch]
+                  #_invoice/identifier]} batch]
       (str "\n"
            #_("+ " identifier "\n")
            "+ " (format-date creation_date) "\n"
@@ -710,7 +701,6 @@
              (d/db conn)
              last-seen)))
 
-
 (defn get-summary [conn last-seen]
   (d/q {:find '[(sum ?s) (count ?e) (count-distinct ?b)]
         :in '[$ ?last-seen]
@@ -761,7 +751,6 @@
               :where base-boost-q}
              (d/db conn)
              last-seen)))
-
 
 (defn get-lnd-boosts-from-db [conn show-regex last-seen-idx]
   (into (sorted-set-by (fn [& args] (apply compare (reverse (map :invoice/creation_date args)))))
@@ -816,20 +805,19 @@
                        [(if (= k :sender_name_normalized) :sender_name k) v]))
                 boost)))))
 
-(defn boost-report-v2 [conn show-regex last-seen-index]
-  (->> (get-lnd-boosts-from-db conn show-regex last-seen-index)
-       v2->v1
-       v1/boost-report
-       #_(#(with-out-str (clojure.pprint/pprint %)))
-       (spit "/tmp/new_boosts.md")))
+#_(defn boost-report-v2 [conn show-regex last-seen-index]
+    (->> (get-lnd-boosts-from-db conn show-regex last-seen-index)
+         v2->v1
+         v1/boost-report
+         #_(#(with-out-str (clojure.pprint/pprint %)))
+         (spit "/tmp/new_boosts.md")))
 
-(defn make-stream-summary [conn show-regex last-seen]
-  (let [[sats streams streamers] (get-stream-summary conn show-regex last-seen)]
-    (str "### Stream Totals\n"
-         "+ Total Sats: " (v1/int-comma sats) "\n"
-         "+ Total Streams: " (v1/int-comma streams) "\n"
-         "+ Unique Streamers: " (v1/int-comma streamers) "\n")))
-
+#_(defn make-stream-summary [conn show-regex last-seen]
+    (let [[sats streams streamers] (get-stream-summary conn show-regex last-seen)]
+      (str "### Stream Totals\n"
+           "+ Total Sats: " (v1/int-comma sats) "\n"
+           "+ Total Streams: " (v1/int-comma streams) "\n"
+           "+ Unique Streamers: " (v1/int-comma streamers) "\n")))
 
 (alter-var-root #'*out* (constantly *out*))
 
@@ -858,7 +846,6 @@
 
   (def last-lup #inst "2023-03-27T12-07:00")
 
-
 ;; v2
 
   #_(require '[datalevin.core :as d])
@@ -868,13 +855,11 @@
   #_(inspect (#'b/indexable 1 1 "abc" nil))
   #_(#'s/low-datom->indexable {"abdd" 1222} (d/datom 1 "abdd" "bbb"))
 
-
-  ;; (def conn (d/get-conn "/tmp/testdb" schema))
+;; (def conn (d/get-conn "/tmp/testdb" schema))
   (def conn (d/get-conn dbi schema))
 
   (get-boosts {:token test-token :items 2
                :page 1 :after #inst "2024-08-01T11:10:00"
-
 
                #_:since #_"txjbH2VGZJ7Z9MzCtAaQWhJ4"})
 
@@ -921,7 +906,6 @@
         (map (fn [[_ a v]] [a v]))
         (d/datoms (d/db conn) :eav 4473))
 
-
   #_(first (d/rseek-datoms (d/db conn) :eav))
   #_(first (d/seek-datoms (d/db conn) :ave :invoice/creation_date))
   ;; TODO: slow and probably wrong
@@ -963,8 +947,6 @@
   (d/q '[:find (pull ?e ["*"])
          :where [?e :boostagram/podcast "Mere Mortals"]]
        (d/db conn))
-
-
 
   (boost-report-v2 conn #"(?i).*linux.*" (-> #inst "2024-07-01T00:00Z" (#(.getTime %)) (/ 1000)))
   (boost-report-v2 conn #"(?i).*self.*" "443250")
@@ -1034,12 +1016,12 @@
          [?e :invoice/identifier ?id]]
        (d/db conn))
 
-  (->> "450692"
+  (->> #_"450692"
+       "453978"
        (get-boost-summary-for-report conn #"(?i).*unplugged.*")
        sort-report
        format-sorted-report
        (spit "/tmp/boost_test.md"))
-
 
   (def schema
     {:invoice/identifier {:db/valueType :db.type/string

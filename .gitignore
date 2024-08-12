@@ -1,8 +1,10 @@
 .calva
 .clj-kondo
-.lsp
 .cpcache
-.env
 .devenv
-decrypted_secrets
+.env
+.lsp
+.nrepl-port
 age_key.txt
+decrypted_secrets
+result

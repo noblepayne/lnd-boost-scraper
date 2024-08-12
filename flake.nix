@@ -83,19 +83,19 @@
     packages =
       builtins.mapAttrs (system: pkgs: {
         deps-lock = clj-nix.packages.${system}.deps-lock;
-	container = pkgs.dockerTools.buildLayeredImage {
-	  name = "alby-boost-scraper";
-	  config = {
-	    Entrypoint = [ "${self.packages.${system}.default}/bin/alby-boost-scraper" ];
-	  };
-	};
+        container = pkgs.dockerTools.buildLayeredImage {
+          name = "lnd-boost-scraper";
+          config = {
+            Entrypoint = ["${self.packages.${system}.default}/bin/lnd-boost-scraper"];
+          };
+        };
         default = clj-nix.lib.mkCljApp {
           inherit pkgs;
           modules = [
             {
               projectSrc = ./.;
-              name = "com.noblepayne/alby-boost-scraper";
-              main-ns = "boost-scraper.scrapev2";
+              name = "com.noblepayne/lnd-boost-scraper";
+              main-ns = "boost-scraper.core";
               compileCljOpts = {
                 java-opts = [
                   "--add-opens=java.base/java.nio=ALL-UNNAMED"

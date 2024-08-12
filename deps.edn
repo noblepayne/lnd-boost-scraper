@@ -16,4 +16,4 @@
                         "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
                         ;; lnd uses cert with "localhost"
                         "-Djdk.internal.httpclient.disableHostnameVerification"]}
-  :neil {:project {:name com.noblepayne/alby-boost-scraper}}}}
+  :neil {:project {:name com.noblepayne/lnd-boost-scraper}}}}
