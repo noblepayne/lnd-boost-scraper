@@ -3,7 +3,7 @@
          ;; concurenncy
          org.clojure/core.async {:mvn/version "1.6.681"}
          ;; database
-         datalevin/datalevin {:mvn/version "0.9.8"}
+         datalevin/datalevin {:mvn/version "0.9.10"}
          ;; HTTP
          cheshire/cheshire {:mvn/version "5.13.0"}
          hato/hato {:mvn/version "0.9.0"}
