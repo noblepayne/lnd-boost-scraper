@@ -70,20 +70,109 @@
   (reset! lnd/scrape-can-run true)
   (async/take!
    (async/thread-call (fn []
-                        (scrape-lnd-boosts lnd-conn lnd/macaroon 500)))
+                        (scrape-lnd-boosts lnd-conn lnd/macaroon 100)))
    (fn [x] (println "========== DONE ==========" x)))
 
-  (->> 1722901411
-       (boost-scraper.reports/boost-report alby-conn #"(?i).*coder.*")
+  (->> #_1722901411 (->epoch #inst "2024-07-01T07:00")
+       (boost-scraper.reports/boost-report alby-conn #"(?i).*")
        (spit "/tmp/alby"))
 
-  (->> 1722901411
-       (boost-scraper.reports/boost-report lnd-conn #"(?i).*coder.*")
+  (->> 1722901411 #_(->epoch #inst "2024-07-01T07:00")
+       (boost-scraper.reports/boost-report lnd-conn #"(?i).*")
        (spit "/tmp/lnd"))
 
   (d/q '[:find (d/pull ?e [:*])
          :where [?e :invoice/created_at 1722553687]]
        (d/db alby-conn))
 
+  ;; diffing between upstreams
+
+  (defn unique-content-ids [conn since]
+    (first (d/q '[:find [(distinct ?cid)]
+                  :in $ ?since
+                  :where
+                  #_[?e :boostagram/action "boost"]
+                  [?e :invoice/creation_date ?cd]
+                  [(< ?since ?cd)]
+                  [?e :boostagram/content_id ?cid]]
+                (d/db conn)
+                since)))
+
+  (defn ->epoch [inst]
+    (-> inst .toInstant .getEpochSecond))
+
+  (def alby-ids
+    (unique-content-ids alby-conn
+                        (->epoch #inst "2024-07-01T07:00")))
+
+  (def lnd-ids
+    (unique-content-ids lnd-conn
+                        (->epoch #inst "2024-07-01T07:00")))
+
+  (clojure.set/difference lnd-ids alby-ids)
+  (d/q '[:find [(d/pull ?e [#_:*
+                            :boostagram/sender_name_normalized
+                            :boostagram/value_sat_total
+                            :boostagram/podcast
+                            :boostagram/episode
+                            :boostagram/app_name
+                            :invoice/created_at
+                            :invoice/creation_date
+                            :invoice/identifier
+                            :boostagram/message]) ...] :in $ ids :where [?e :boostagram/content_id ?cd]
+         [(in ?cd ids)]] (d/db lnd-conn) *1)
+
+  (clojure.set/difference alby-ids lnd-ids)
+  (d/q '[:find [(d/pull ?e [:boostagram/sender_name_normalized
+                            :boostagram/value_sat_total
+                            :boostagram/podcast
+                            :boostagram/episode
+                            :boostagram/app_name
+                            :invoice/created_at
+                            :invoice/creation_date
+                            :invoice/identifier
+                            :boostagram/message]) ...] :in $ ids :where [?e :boostagram/content_id ?cd]
+         [(in ?cd ids)]] (d/db alby-conn) *1)
+
+
+  (defn load-missing-boosts [dest-conn src-conn src-boost-cids]
+    (let [entities (d/pull-many (d/db src-conn)
+                                [:*]
+                                (map #(vector :boostagram/content_id %)
+                                     src-boost-cids))
+          entities (map #(dissoc % :db/id) entities)]
+      (d/transact! dest-conn entities)))
+
+  (load-missing-boosts lnd-conn alby-conn *1)
+
+  (defn format-boosts [{:keys [boostagram/sender_name_normalized
+                               boostagram/value_sat_total
+                               boostagram/podcast
+                               boostagram/episode
+                               boostagram/app_name
+                               invoice/created_at
+                               invoice/creation_date
+                               boostagram/message]}]
+    (str "### From: " sender_name_normalized
+         "\n + " (reports/int-comma value_sat_total) " sats"
+         "\n + " podcast " / " episode
+         "\n + " app_name " " created_at " (" creation_date ")"
+         "\n" (clojure.string/join "\n" (map #(str "   > " %)
+                                             (clojure.string/split-lines (or message ""))))
+         "\n"))
+
+
+  (identity (clojure.string/join "\n" (map format-boosts (sort-by :invoice/created_at *1))))
+
+  (d/q '[:find [(d/pull ?e [:invoice/created_at])]
+         :where
+         [(d/q [:find (min ?cd)
+                :where
+                [?e' :boostagram/action "boost"]
+                [?e' :invoice/creation_date ?cd]] $) [[?maxcd]]]
+         [?e :invoice/creation_date ?maxcd]]
+       (d/db alby-conn))
+
   (d/close alby-conn)
-  (d/close lnd-conn))
+  (d/close lnd-conn)
+  )
