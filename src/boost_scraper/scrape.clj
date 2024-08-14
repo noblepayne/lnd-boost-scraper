@@ -24,7 +24,9 @@
    :boostagram/action {:db/valueType :db.type/string}
    :boostagram/message {:db/valueType :db.type/string}
    :boostagram/value_msat_total {:db/valueType :db.type/long}
-   :boostagram/value_sat_total {:db/valueType :db.type/long}}
+   :boostagram/value_sat_total {:db/valueType :db.type/long}
+   :boostagram/content_id {:db/valueType :db.type/string
+                           :db/unique :db.unique/identity}}
     ;;
     ;; :table/column {:db/valueType :db.type/...}
   )
@@ -74,7 +76,7 @@
                  (.substring s 1)
                  s)))))
 
-(defn decode-boost [rawboost]
+(defn decode-boost [rawboost debug]
   (try
     (let [decoder (java.util.Base64/getDecoder)]
       (-> decoder
@@ -84,7 +86,40 @@
           remove-nil-vals
           (#(namespace-invoice-keys :boostagram %))
           (#(flatten-paths "/" %))))
-    (catch Exception e (println "EXCEPTION DECODING BOOST: " rawboost) {})))
+    (catch Exception e (println "EXCEPTION DECODING BOOST: " rawboost debug) {})))
+
+(defn sha256 [string]
+  (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes string "UTF-8"))]
+    (apply str (map (partial format "%02x") digest))))
+
+(defn- content-id [{:keys [:boostagram/action
+                           :boostagram/app_name
+                           :boostagram/episode
+                           :boostagram/podcast
+                           :boostagram/sender_name
+                           :boostagram/value_msat_total
+                           :boostagram/message
+                           :boostagram/ts
+                           :boostagram/time
+                           :boostagram/guid
+                           :boostagram/feedID
+                           :boostagram/itemID
+                           :boostagram/episode_guid
+                           :boostagram/boost_uuid]}]
+  (sha256 (str/join " " [action
+                         episode
+                         episode_guid
+                         itemID
+                         podcast
+                         guid
+                         feedID
+                         sender_name
+                         value_msat_total
+                         boost_uuid
+                         message
+                         app_name
+                         ts
+                         time])))
 
 (defn coerce-invoice-vals [invoice]
   (let [;; From LND; if present use as string identifier.
@@ -137,7 +172,7 @@
                   (do #_(println debug "\n")
                    (into
                     (dissoc invoice :invoice/htlcs)
-                    (decode-boost rawboost)))
+                    (decode-boost rawboost debug)))
                   invoice)
         ;; Noramlize sender name.
         invoice (if-let [sender_name (get invoice :boostagram/sender_name)]
@@ -152,7 +187,9 @@
                    invoice
                    :boostagram/value_sat_total
                    (/ msats 1000))
-                  invoice)]
+                  invoice)
+        ;; Add attempt at content-derived ID
+        invoice (assoc invoice :boostagram/content_id (content-id invoice))]
     invoice))
 
 (defn process-batch [batch]
