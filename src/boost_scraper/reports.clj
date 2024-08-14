@@ -6,7 +6,7 @@
             [clojure.pprint :as pprint]))
 
 (defn get-boost-summary-for-report [conn show-regex last-seen-timestamp]
-  (d/q '[:find [?ballers ?boosts ?thanks ?summary ?stream_summary ?total_summary]
+  (d/q '[:find  [?ballers ?boosts ?thanks ?summary ?stream_summary ?total_summary ?last_seen_id]
          :in $ ?regex ?last-seen-timestamp
          :where
          ;; find all invoices since last-seen for show-regex
@@ -28,6 +28,22 @@
                     [(re-matches ?regex' ?episode) _])]
                $ ?regex ?last-seen-timestamp)
           ?valid_eids]
+         ;; find max boost creation_date
+         [(d/q [:find [(max ?cd')]
+                :in $ [[?e'] ...]
+                :where
+                [?e' :boostagram/action "boost"]
+                [?e' :invoice/creation_date ?cd']]
+               $ ?valid_eids)
+          ?maxcd]
+         ;; limit eids
+         [(d/q [:find ?e
+                :in $ [[?e] ...] [?maxcd']
+                :where
+                [?e :invoice/creation_date ?cd]
+                [(<= ?cd ?maxcd')]]
+               $ ?valid_eids ?maxcd)
+          ?valid_eids_before_maxcd]
          ;; aggregate boosts by sender_name_normalized
          [(d/q [:find ?sender_name_normalized (sum ?sats) (count ?e) (min ?d) (distinct ?e)
                 :in $ [[?e] ...]
@@ -36,7 +52,7 @@
                 [?e :boostagram/sender_name_normalized ?sender_name_normalized]
                 [?e :boostagram/value_sat_total ?sats]
                 [?e :invoice/creation_date ?d]]
-               $ ?valid_eids)
+               $ ?valid_eids_before_maxcd)
           ?sats_by_eid]
          ;; pull individual boost data for each sender
          [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts
@@ -79,16 +95,15 @@
                $ ?sats_by_eid_with_deets)
           ?thanks]
          ;; boost summary
-         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender) (max ?creation_date)]
+         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
                 :in $ [[?e] ...]
                 :where
                 ;; boost only
                 [?e :boostagram/action "boost"]
                 ;; bind our vars to aggregate
-                [?e :invoice/creation_date ?creation_date]
                 [?e :boostagram/value_sat_total ?sats]
                 [?e :boostagram/sender_name_normalized ?sender]]
-               $ ?valid_eids)
+               $ ?valid_eids_before_maxcd)
           ?summary]
          ;; stream summary
          [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
@@ -97,20 +112,20 @@
                 ;; streams only
                 [?e :boostagram/action "stream"]
                 ;; bind our vars to aggregate
-                [?e :boostagram/sender_name_normalized ?sender]
-                [?e :boostagram/value_sat_total ?sats]]
-               $ ?valid_eids)
+                [?e :boostagram/value_sat_total ?sats]
+                [?e :boostagram/sender_name_normalized ?sender]]
+               $ ?valid_eids_before_maxcd)
           ?stream_summary]
          ;; total summary
-         [(d/q [:find [(sum ?sats) ?maxcd (count-distinct ?sender)]
-                :in $ [[?e] ...] [_ _ _ ?maxcd]
+         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
+                :in $ [[?e] ...]
                 :where
                 ;; bind our vars to aggregate
-                [?e :invoice/creation_date ?creation_date]
-                [?e :boostagram/sender_name_normalized ?sender]
-                [?e :boostagram/value_sat_total ?sats]]
-               $ ?valid_eids ?summary)
+                [?e :boostagram/value_sat_total ?sats]
+                [?e :boostagram/sender_name_normalized ?sender]]
+               $ ?valid_eids_before_maxcd)
           ?total_summary]
+         [(first ?maxcd) ?last_seen_id]
           ;; TODO needed? find ID corresponding to max timestamp
          #_[(d/q [:find [?total_sat_sum ?last_seen_id ?distinct_senders]
                   :in $ [?total_sat_sum ?last_cd ?distinct_senders]
@@ -127,7 +142,8 @@
     thanks
     [boost_total_sats boost_total_boosts boost_total_boosters]
     [stream_total_sats stream_total_streams stream_total_streamers]
-    [total_sats last_seen_id total_unique_boosters]]]
+    [total_sats total_invoices total_unique_boosters]
+    last_seen_id]]
   (letfn [(sort-boosts [[sender total count mindate boosts]]
             {:sender sender
              :total total
@@ -144,6 +160,7 @@
                       :stream_total_streams stream_total_streams
                       :stream_total_streamers stream_total_streamers}
      :summary {:total_sats total_sats
+               :total_invoices total_invoices
                :last_seen_id last_seen_id
                :total_unique_boosters total_unique_boosters}}))
 
@@ -207,7 +224,8 @@
        "\n"
        "\n## Summary"
        "\n+ Total Sats: " (int-comma (:total_sats summary))
-       "\n+ Total Boosters: " (int-comma (:total_unique_boosters summary))
+       "\n+ Total Invoices: " (int-comma (:total_invoices summary))
+       "\n+ Total Unique Senders: " (int-comma (:total_unique_boosters summary))
        "\n"
        "\n## Last Seen"
        "\n+ Last seen ID: " (:last_seen_id summary)
