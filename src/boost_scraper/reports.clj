@@ -5,8 +5,28 @@
             [clojure.string :as str]
             [clojure.pprint :as pprint]))
 
+(defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
+  (d/q '[:find (d/pull ?e [:*])
+         :in $ ?regex' ?last-seen-timestamp'
+         :where
+         ;; find invoices after our last seen id
+         ;; [?last :invoice/identifier ?last-seen']
+         ;; [?last :invoice/creation_date ?last_creation_date]
+         [?e :invoice/creation_date ?creation_date]
+         [(< ?last-seen-timestamp' ?creation_date)]
+         ;; filter out those troublemakers
+         (not [?e :boostagram/sender_name_normalized "chrislas"])
+         (not [?e :boostagram/sender_name_normalized "noblepayne"])
+         [?e :boostagram/action "boost"]
+         ;; match our particular show
+         [?e :boostagram/podcast ?podcast]
+         [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+         (or [(re-matches ?regex' ?podcast) _]
+             [(re-matches ?regex' ?episode) _])]
+       (d/db conn) show-regex last-seen-timestamp))
+
 (defn get-boost-summary-for-report [conn show-regex last-seen-timestamp]
-  (d/q '[:find  [?ballers ?boosts ?thanks ?summary ?stream_summary ?total_summary ?last_seen_id]
+  (d/q '[:find [?ballers ?boosts ?thanks ?summary ?stream_summary ?total_summary ?last_seen_id]
          :in $ ?regex ?last-seen-timestamp
          :where
          ;; find all invoices since last-seen for show-regex
@@ -36,13 +56,14 @@
                 [?e' :invoice/creation_date ?cd']]
                $ ?valid_eids)
           ?maxcd]
+         [(first ?maxcd) ?last_seen_id]
          ;; limit eids
          [(d/q [:find ?e
-                :in $ [[?e] ...] [?maxcd']
+                :in $ [[?e] ...] ?maxcd'
                 :where
                 [?e :invoice/creation_date ?cd]
                 [(<= ?cd ?maxcd')]]
-               $ ?valid_eids ?maxcd)
+               $ ?valid_eids ?last_seen_id)
           ?valid_eids_before_maxcd]
          ;; aggregate boosts by sender_name_normalized
          [(d/q [:find ?sender_name_normalized (sum ?sats) (count ?e) (min ?d) (distinct ?e)
@@ -95,7 +116,7 @@
                $ ?sats_by_eid_with_deets)
           ?thanks]
          ;; boost summary
-         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
+         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
                 :in $ [[?e] ...]
                 :where
                 ;; boost only
@@ -104,9 +125,11 @@
                 [?e :boostagram/value_sat_total ?sats]
                 [?e :boostagram/sender_name_normalized ?sender]]
                $ ?valid_eids_before_maxcd)
-          ?summary]
+          ?summary']
+         [(or (first ?summary') [0 0 0]) ?summary]
+         ;; handle empty results. having a nil here short circuits the whole query
          ;; stream summary
-         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
+         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
                 :in $ [[?e] ...]
                 :where
                 ;; streams only
@@ -115,17 +138,18 @@
                 [?e :boostagram/value_sat_total ?sats]
                 [?e :boostagram/sender_name_normalized ?sender]]
                $ ?valid_eids_before_maxcd)
-          ?stream_summary]
+          ?stream_summary']
+         [(or (first ?stream_summary') [0 0 0]) ?stream_summary]
          ;; total summary
-         [(d/q [:find [(sum ?sats) (count ?e) (count-distinct ?sender)]
+         [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
                 :in $ [[?e] ...]
                 :where
                 ;; bind our vars to aggregate
                 [?e :boostagram/value_sat_total ?sats]
                 [?e :boostagram/sender_name_normalized ?sender]]
                $ ?valid_eids_before_maxcd)
-          ?total_summary]
-         [(first ?maxcd) ?last_seen_id]
+          ?total_summary']
+         [(or (first ?total_summary') [0 0 0]) ?total_summary]
           ;; TODO needed? find ID corresponding to max timestamp
          #_[(d/q [:find [?total_sat_sum ?last_seen_id ?distinct_senders]
                   :in $ [?total_sat_sum ?last_cd ?distinct_senders]
