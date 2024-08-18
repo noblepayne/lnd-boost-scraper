@@ -1,4 +1,4 @@
-(ns boost-scraper.scrape
+(ns boost-scraper.db
   (:require [cheshire.core :as json]
             [datalevin.core :as d]
             [clojure.instant]
@@ -7,6 +7,7 @@
 #_(def dbi "/media/wes/a8dc84bb-2377-490e-a4b3-027425850e03/workdir/boosts/boostdb")
 (def alby-dbi "/home/wes/Downloads/boostdb/alby_boostdb")
 (def lnd-dbi "/home/wes/Downloads/boostdb/lnd_boostdb")
+(def nodecan-dbi "/home/wes/Downloads/boostdb/nodecan_boostdb")
 
 (def schema
   {:invoice/identifier {:db/valueType :db.type/string
@@ -16,6 +17,9 @@
    :invoice/creation_date_per_30 {:db/valueType :db.type/long}
    :invoice/created_at {:db/valueType :db.type/instant}
    :invoice/add_index {:db/valueType :db.type/long}
+   :invoice/comment {:db/valueType :db.type/string}
+   :invoice/keysend {:db/valueType :db.type/string}
+   :invoice/memo {:db/valueType :db.type/string}
    :boostagram/sender_name {:db/valueType :db.type/string}
    :boostagram/sender_name_normalized {:db/valueType :db.type/string}
    :boostagram/episode {:db/valueType :db.type/string}
@@ -26,7 +30,9 @@
    :boostagram/value_msat_total {:db/valueType :db.type/long}
    :boostagram/value_sat_total {:db/valueType :db.type/long}
    :boostagram/content_id {:db/valueType :db.type/string
-                           :db/unique :db.unique/identity}}
+                           ;; TODO: enable uniqueness after we're sure this is unique enough
+                           ;; N.B. how does it work for streams? What is someone streams the same show twice?
+                           #_:db/unique #_:db.unique/identity}}
     ;;
     ;; :table/column {:db/valueType :db.type/...}
   )
@@ -88,6 +94,15 @@
           (#(flatten-paths "/" %))))
     (catch Exception e (println "EXCEPTION DECODING BOOST: " rawboost debug) {})))
 
+(defn decode-keysend [rawboost debug]
+  (try
+    (let [decoder (java.util.Base64/getDecoder)]
+      (-> decoder
+          (.decode rawboost)
+          (#(java.lang.String. %))
+          (#(hash-map :invoice/keysend %))))
+    (catch Exception e (println "EXCEPTION DECODING KEYSEND: " rawboost debug) {})))
+
 (defn sha256 [string]
   (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes string "UTF-8"))]
     (apply str (map (partial format "%02x") digest))))
@@ -121,6 +136,7 @@
                          ts
                          time])))
 
+;; FIXME: create common base and split out alby and lnd specifics
 (defn coerce-invoice-vals [invoice]
   (let [;; From LND; if present use as string identifier.
         invoice (if-let [add_index (get invoice :invoice/add_index)]
@@ -167,13 +183,30 @@
                      (java.util.Date/from (java.time.Instant/ofEpochSecond creation_date)))
                     invoice)
                   invoice)
+        invoice (if-let [[{custom_records :custom_records}] (get invoice :invoice/htlcs)]
+                  (let [keysend (when-let [rawkeysend (get custom_records :34349334)]
+                                  (decode-keysend rawkeysend custom_records))
+                        boost (when-let [rawboost (get custom_records :7629169) ]
+                                (decode-boost rawboost custom_records))]
+                    (reduce into invoice (remove empty? [keysend boost])))
+                  invoice)
         ;; From LND; if present parse into boostagram data.
-        invoice (if-let [[{{rawboost :7629169} :custom_records} :as debug] (get invoice :invoice/htlcs)]
+        #_invoice #_(if-let [[{{rawboost :7629169} :custom_records} :as debug] (get invoice :invoice/htlcs)]
                   (do #_(println debug "\n")
                    (into
-                    (dissoc invoice :invoice/htlcs)
+                    invoice
+                    #_(dissoc invoice :invoice/htlcs)
                     (decode-boost rawboost debug)))
                   invoice)
+        ;; From LND; if present parse into keysend data.
+        #_invoice #_(if-let [[{{rawkeysend :34349334} :custom_records} :as debug] (get invoice :invoice/htlcs)]
+                  (do (println "KEYSENDING")
+                      (into
+                       invoice
+                       #_(dissoc invoice :invoice/htlcs)
+                       (decode-keysend rawkeysend debug)))
+                  invoice)
+        invoice (dissoc invoice :invoice/htlcs)
         ;; Noramlize sender name.
         invoice (if-let [sender_name (get invoice :boostagram/sender_name)]
                   (assoc
@@ -194,11 +227,7 @@
 
 (defn process-batch [batch]
   (into []
-        (comp (map #(dissoc % :features))
-              (map #(dissoc % :amp_invoice_state))
-              (map #(dissoc % :metadata))
-              (map #(dissoc % :custom_records))
-              #_(map #(println %))
+        (comp (map #(dissoc % :features :amp_invoice_state :metadata :custom_records))
               (map #(namespace-invoice-keys :invoice %1))
               (map #(flatten-paths "/" %1))
               (map remove-nil-vals)
