@@ -65,7 +65,7 @@
         (fn [boost-batch]
           (let [filtered-batch (filter :creation_date boost-batch)
                 creation_dates (map :creation_date filtered-batch)
-                first_creation_date (apply min creation_dates)]
+                first_creation_date (apply max creation_dates)]
             (<= epoch first_creation_date))))))
 
 (comment

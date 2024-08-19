@@ -172,6 +172,7 @@
 
   (autoscrape-alby alby-conn alby/test-token 2000)
   (autoscrape-lnd lnd-conn lnd/macaroon 500)
+  (autoscrape-nodecan nodecan-conn lnd/nodecan-macaroon 500)
 
   (->> #_1722901411 (->epoch #inst "2024-07-01T07:00") #_1722388429
        (boost-scraper.reports/get-boost-summary-for-report' alby-conn #"(?i).*")
@@ -179,11 +180,11 @@
        (sort-by :invoice/creation_date)
        (spit "/tmp/alby"))
 
-  (->> #_(->epoch #inst "2024-07-01T07:00")  1723408945
-       (boost-scraper.reports/boost-report lnd-conn #"(?i).*Unplugged.*")
+  (->> #_(->epoch #inst "2024-07-01T07:00") 1723572117
+       (boost-scraper.reports/boost-report lnd-conn #"(?i).*coder.*")
        #_(into [] cat)
        #_(sort-by :invoice/creation_date)
-       (spit "/tmp/lnd"))
+       (spit "/tmp/lnd.md"))
 
   (->> #_1722901411 (->epoch #inst "2024-08-01T07:00")
        (boost-scraper.reports/get-boost-summary-for-report nodecan-conn #"(?i).*")
