@@ -1,5 +1,5 @@
 (ns boost-scraper.legacy
-  (:require '[datalevin.core :as d]))
+  (:require [datalevin.core :as d]))
 
 (def base-boost-q
   '[;; find last seen boost

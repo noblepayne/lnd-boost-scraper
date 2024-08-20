@@ -10,6 +10,74 @@
             [datalevin.core :as d]
             [clojure.instant]))
 
+(defn ->epoch [inst]
+  (-> inst .toInstant .getEpochSecond))
+
+(defn format-boosts [{:keys [boostagram/sender_name_normalized
+                             boostagram/value_sat_total
+                             boostagram/podcast
+                             boostagram/episode
+                             boostagram/app_name
+                             invoice/created_at
+                             invoice/creation_date
+                             boostagram/message]}]
+  (str "### From: " sender_name_normalized
+       "\n + " (reports/int-comma value_sat_total) " sats"
+       "\n + " podcast " / " episode
+       "\n + " app_name " " created_at " (" creation_date ")"
+       "\n" (clojure.string/join "\n" (map #(str "   > " %)
+                                           (clojure.string/split-lines (or message ""))))
+       "\n"))
+
+(defn unique-content-ids [conn since]
+  (first (d/q '[:find [(distinct ?cid)]
+                :in $ ?since
+                :where
+                #_[?e :boostagram/action "boost"]
+                [?e :invoice/creation_date ?cd]
+                [(< ?since ?cd)]
+                [?e :boostagram/content_id ?cid]]
+              (d/db conn)
+              since)))
+
+(defn find-similar [conn action snn timestamp delta]
+  (d/q '[:find [(d/pull ?e [:*]) ...]
+         :in $ ?action ?snn ?start ?stop
+         :where
+         [?e :boostagram/action ?action]
+         [?e :boostagram/sender_name_normalized ?snn]
+         [?e :invoice/creation_date ?cd]
+         [(<= ?start ?cd ?stop)]]
+       (d/db conn)
+       action
+       snn
+       (- timestamp delta)
+       (+ timestamp delta)))
+
+  (defn load-missing-boosts! [dest-conn src-conn src-boost-cids]
+    (let [entities #_(d/pull-many (d/db src-conn)
+                                  [:*]
+                                  (map #(vector :boostagram/content_id %)
+                                       src-boost-cids))
+          (d/q '[:find [(d/pull ?e [:*]) ...]
+                 :in $ [?cid ...]
+                 :where
+                 [?e :boostagram/content_id ?cid]]
+               (d/db src-conn) src-boost-cids)
+          entities (map #(dissoc % :db/id) entities)]
+      (d/transact! dest-conn entities)))
+  
+  (defn sync-mising-boosts! [dest-conn src-conn since]
+    (let [dest-ids (unique-content-ids dest-conn since)
+          src-ids (unique-content-ids src-conn since)
+          uniq-to-src (clojure.set/difference src-ids dest-ids)]
+      (load-missing-boosts! dest-conn src-conn uniq-to-src)))
+
+(defn ten-minutes-ago []
+  (let [now (/ (System/currentTimeMillis) 1000)
+        ten-minutes-ago (- now (* 10 60))]
+    ten-minutes-ago))
+
 #_(defn scrape-boosts-since [conn token items-per-page wait since]
     (->> (alby/get-all-boosts token items-per-page :wait wait :since since)
          (db/add-boosts conn)))
@@ -79,7 +147,9 @@
 (defn -main [& args]
   (let [lnd-conn (d/get-conn db/lnd-dbi db/schema)
         alby-conn (d/get-conn db/alby-dbi db/schema)
-        lnd-macaroon (lnd/read-macaroon (System/getenv "MACAROON_PATH"))
+        nodecan-conn (d/get-conn db/nodecan-dbi db/schema)
+        lnd-macaroon (lnd/read-macaroon (System/getenv "JBNODE_MACAROON_PATH"))
+        nodecan-macaroon (lnd/read-macaroon (System/getenv "NODECAN_MACAROON_PATH"))
         alby-token (System/getenv "ALBY_ACCESS_CODE")
         runtime (Runtime/getRuntime)
         shutdown-hook (Thread. (fn []
@@ -87,6 +157,7 @@
                                  (reset! lnd/scrape-can-run false)
                                  (reset! alby/scrape-can-run false)
                                  (d/close lnd-conn)
+                                 (d/close nodecan-conn)
                                  (d/close alby-conn)))
         _ (.addShutdownHook runtime shutdown-hook)
         lnd-polling-thread (Thread. (fn []
@@ -99,11 +170,25 @@
                                        (while true
                                          (println "scraping alby")
                                          (autoscrape-alby alby-conn alby-token 3000)
+                                         (println "syncing to jbnode")
+                                         (sync-mising-boosts! lnd-conn alby-conn (ten-minutes-ago))
                                          (println "sleeping")
-                                         (Thread/sleep 60000))))]
+                                         (Thread/sleep 60000))))
+        nodecan-polling-thread (Thread. (fn []
+                                       (while true
+                                         (println "scraping nodecan")
+                                         (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
+                                         (println "syncing to jbnode")
+                                         (sync-mising-boosts! lnd-conn nodecan-conn (ten-minutes-ago))
+                                         (println "sleeping")
+                                         (Thread/sleep 10000))))
+        ]
+
     (.start lnd-polling-thread)
+    (.start nodecan-polling-thread)
     (.start alby-polling-thread)
     (.join lnd-polling-thread)
+    (.join nodecan-polling-thread)
     (.join alby-polling-thread)))
 
 (comment
@@ -140,7 +225,7 @@
    (async/thread-call (fn []
                         (scrape-lnd-boosts lnd-conn lnd/macaroon 500)))
    (fn [x] (println "========== DONE ==========" x)))
-  
+
   (scrape-nodecan-boosts nodecan-conn lnd/nodecan-macaroon 1000)
 
   (async/take! (async/thread-call
@@ -158,7 +243,7 @@
                    lnd-conn
                    lnd/macaroon
                    (->epoch #inst "2024-07-01T07:00")
-                   500)))
+                   50)))
                (fn [_] (println "lnd sync complete")))
 
   (async/take! (async/thread-call
@@ -175,19 +260,19 @@
   (autoscrape-nodecan nodecan-conn lnd/nodecan-macaroon 500)
 
   (->> #_1722901411 (->epoch #inst "2024-07-01T07:00") #_1722388429
-       (boost-scraper.reports/get-boost-summary-for-report' alby-conn #"(?i).*")
+       (boost-scraper.reports/get-boost-summary-for-report' lnd-conn #"(?i).*")
        (into [] cat)
        (sort-by :invoice/creation_date)
-       (spit "/tmp/alby"))
+       (spit "/tmp/after_sync"))
 
-  (->> #_(->epoch #inst "2024-07-01T07:00") 1723572117
-       (boost-scraper.reports/boost-report lnd-conn #"(?i).*coder.*")
+  (->> (->epoch #inst "2024-08-05T06:00") #_1721921839
+       (boost-scraper.reports/boost-report lnd-conn #"(?i).*Self-Hosted.*")
        #_(into [] cat)
        #_(sort-by :invoice/creation_date)
        (spit "/tmp/lnd.md"))
 
   (->> #_1722901411 (->epoch #inst "2024-08-01T07:00")
-       (boost-scraper.reports/get-boost-summary-for-report nodecan-conn #"(?i).*")
+       (boost-scraper.reports/boost-report nodecan-conn #"(?i).*")
        (spit "/tmp/nodecan"))
 
   (d/q '[:find (d/pull ?e [:*])
@@ -196,26 +281,16 @@
 
   ;; diffing between upstreams
 
-  (defn unique-content-ids [conn since]
-    (first (d/q '[:find [(distinct ?cid)]
-                  :in $ ?since
-                  :where
-                  #_[?e :boostagram/action "boost"]
-                  [?e :invoice/creation_date ?cd]
-                  [(< ?since ?cd)]
-                  [?e :boostagram/content_id ?cid]]
-                (d/db conn)
-                since)))
-
-  (defn ->epoch [inst]
-    (-> inst .toInstant .getEpochSecond))
-
   (def alby-ids
     (unique-content-ids alby-conn
                         (->epoch #inst "2024-07-01T07:00")))
 
   (def lnd-ids
     (unique-content-ids lnd-conn
+                        (->epoch #inst "2024-07-01T07:00")))
+
+  (def nodecan-ids
+    (unique-content-ids nodecan-conn
                         (->epoch #inst "2024-07-01T07:00")))
 
   (clojure.set/difference lnd-ids alby-ids)
@@ -237,42 +312,31 @@
                             :boostagram/podcast
                             :boostagram/episode
                             :boostagram/app_name
+                            :boostagram/ts
                             :invoice/created_at
                             :invoice/creation_date
                             :invoice/identifier
                             :boostagram/message]) ...] :in $ ids :where [?e :boostagram/content_id ?cd]
          [(in ?cd ids)]] (d/db alby-conn) *1)
 
-  (defn load-missing-boosts [dest-conn src-conn src-boost-cids]
-    (let [entities #_(d/pull-many (d/db src-conn)
-                                [:*]
-                                (map #(vector :boostagram/content_id %)
-                                     src-boost-cids))
-          (d/q '[:find [(d/pull ?e [:*]) ...]
-                 :in $ [?cid ...]
-                 :where
-                 [?e :boostagram/content_id ?cid]]
-               (d/db src-conn) src-boost-cids)
-          entities (map #(dissoc % :db/id) entities)]
-      (d/transact! dest-conn entities)))
+  (clojure.set/difference nodecan-ids lnd-ids)
+  (d/q '[:find [(d/pull ?e [:boostagram/sender_name_normalized
+                            :boostagram/value_sat_total
+                            :boostagram/podcast
+                            :boostagram/episode
+                            :boostagram/app_name
+                            :boostagram/ts
+                            :invoice/created_at
+                            :invoice/creation_date
+                            :invoice/identifier
+                            :boostagram/message]) ...] :in $ ids :where [?e :boostagram/content_id ?cd]
+         [(in ?cd ids)]] (d/db nodecan-conn) *1)
 
-  (load-missing-boosts lnd-conn alby-conn *1)
+  (load-missing-boosts! lnd-conn alby-conn *1)
+  (load-missing-boosts! lnd-conn nodecan-conn *1)
 
-  (defn format-boosts [{:keys [boostagram/sender_name_normalized
-                               boostagram/value_sat_total
-                               boostagram/podcast
-                               boostagram/episode
-                               boostagram/app_name
-                               invoice/created_at
-                               invoice/creation_date
-                               boostagram/message]}]
-    (str "### From: " sender_name_normalized
-         "\n + " (reports/int-comma value_sat_total) " sats"
-         "\n + " podcast " / " episode
-         "\n + " app_name " " created_at " (" creation_date ")"
-         "\n" (clojure.string/join "\n" (map #(str "   > " %)
-                                             (clojure.string/split-lines (or message ""))))
-         "\n"))
+  (sync-mising-boosts! lnd-conn alby-conn (->epoch #inst "2024-07-01T07:00"))
+  (sync-mising-boosts! lnd-conn nodecan-conn (->epoch #inst "2024-07-01T07:00"))
 
   (identity (clojure.string/join "\n" (map format-boosts (sort-by :invoice/created_at *1))))
 
@@ -301,15 +365,14 @@
        (d/db lnd-conn)
        (->epoch #inst "2024-08-10T20:00"))
 
-  
   (d/q '[:find (d/pull ?e [:invoice/creation_date :boostagram/action])
          :where [?e :invoice/identifier "453978"]]
        (d/db lnd-conn))
 
- (run!
-  #(d/transact! lnd-conn
-               (map (fn [e] [:db.fn/retractEntity e]) %))
-  (partition 100 *1))
+  (run!
+   #(d/transact! lnd-conn
+                 (map (fn [e] [:db.fn/retractEntity e]) %))
+   (partition 100 *1))
 
   (d/close alby-conn)
   (d/close lnd-conn)

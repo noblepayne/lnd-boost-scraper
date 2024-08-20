@@ -6,7 +6,7 @@
             [clojure.pprint :as pprint]))
 
 (defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
-  (d/q '[:find (d/pull ?e [:*])
+  (d/q '[:find (d/pull ?e [:db/id :invoice/creation_date :boostagram/content_id :boostagram/value_sat_total] )
          :in $ ?regex' ?last-seen-timestamp'
          :where
          ;; find invoices after our last seen id
