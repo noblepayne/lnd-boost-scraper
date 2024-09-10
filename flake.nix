@@ -55,7 +55,7 @@
                 dotenv.enable = true;
 
                 scripts.format.exec = ''
-                  nixfmt *.nix
+                  nix fmt
                   cljfmt fix .
                 '';
                 scripts.lock.exec = ''
