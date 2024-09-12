@@ -6,7 +6,7 @@
             [clojure.pprint :as pprint]))
 
 (defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
-  (d/q '[:find (d/pull ?e [:db/id :invoice/creation_date :boostagram/content_id :boostagram/value_sat_total] )
+  (d/q '[:find (d/pull ?e [:db/id :invoice/creation_date :boostagram/content_id :boostagram/value_sat_total])
          :in $ ?regex' ?last-seen-timestamp'
          :where
          ;; find invoices after our last seen id
@@ -37,7 +37,8 @@
                 ;; [?last :invoice/identifier ?last-seen']
                 ;; [?last :invoice/creation_date ?last_creation_date]
                 [?e :invoice/creation_date ?creation_date]
-                [(< ?last-seen-timestamp' ?creation_date)]
+                ;; FIXME: why does using `<` not work sometimes? Should be faster than using core fn
+                [(clojure.core/< ?last-seen-timestamp' ?creation_date)]
                 ;; filter out those troublemakers
                 (not [?e :boostagram/sender_name_normalized "chrislas"])
                 (not [?e :boostagram/sender_name_normalized "noblepayne"])
@@ -237,12 +238,12 @@
        "## Thanks\n"
        (format-boost-section thanks)
        "\n## Boost Summary"
-       "\n+ Total Sats: " (int-comma (:boost_total_sats boost-summary))
+       "\n+ Total Boosted Sats: " (int-comma (:boost_total_sats boost-summary))
        "\n+ Total Boosts: " (int-comma (:boost_total_boosts boost-summary))
        "\n+ Total Boosters: " (int-comma (:boost_total_boosters boost-summary))
        "\n"
        "\n## Stream Summary"
-       "\n+ Total Sats: " (int-comma (:stream_total_sats stream-summary))
+       "\n+ Total Streamed Sats: " (int-comma (:stream_total_sats stream-summary))
        "\n+ Total Streams: " (int-comma (:stream_total_streams stream-summary))
        "\n+ Total Streamers: " (int-comma (:stream_total_streamers stream-summary))
        "\n"

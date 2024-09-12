@@ -4,11 +4,11 @@
             [boost-scraper.reports :as reports]
             [boost-scraper.upstreams.lnd :as lnd]
             [boost-scraper.upstreams.alby :as alby]
-            [babashka.http-client :as http]
-            [babashka.cli :as cli]
+            [boost-scraper.web :as web]
             [clojure.core.async :as async]
-            [datalevin.core :as d]
-            [clojure.instant]))
+            [clojure.set :as set]
+            [clojure.instant]
+            [datalevin.core :as d]))
 
 (defn ->epoch [inst]
   (-> inst .toInstant .getEpochSecond))
@@ -54,24 +54,24 @@
        (- timestamp delta)
        (+ timestamp delta)))
 
-  (defn load-missing-boosts! [dest-conn src-conn src-boost-cids]
-    (let [entities #_(d/pull-many (d/db src-conn)
-                                  [:*]
-                                  (map #(vector :boostagram/content_id %)
-                                       src-boost-cids))
-          (d/q '[:find [(d/pull ?e [:*]) ...]
-                 :in $ [?cid ...]
-                 :where
-                 [?e :boostagram/content_id ?cid]]
-               (d/db src-conn) src-boost-cids)
-          entities (map #(dissoc % :db/id) entities)]
-      (d/transact! dest-conn entities)))
-  
-  (defn sync-mising-boosts! [dest-conn src-conn since]
-    (let [dest-ids (unique-content-ids dest-conn since)
-          src-ids (unique-content-ids src-conn since)
-          uniq-to-src (clojure.set/difference src-ids dest-ids)]
-      (load-missing-boosts! dest-conn src-conn uniq-to-src)))
+(defn load-missing-boosts! [dest-conn src-conn src-boost-cids]
+  (let [entities #_(d/pull-many (d/db src-conn)
+                                [:*]
+                                (map #(vector :boostagram/content_id %)
+                                     src-boost-cids))
+        (d/q '[:find [(d/pull ?e [:*]) ...]
+               :in $ [?cid ...]
+               :where
+               [?e :boostagram/content_id ?cid]]
+             (d/db src-conn) src-boost-cids)
+        entities (map #(dissoc % :db/id) entities)]
+    (d/transact! dest-conn entities)))
+
+(defn sync-mising-boosts! [dest-conn src-conn since]
+  (let [dest-ids (unique-content-ids dest-conn since)
+        src-ids (unique-content-ids src-conn since)
+        uniq-to-src (clojure.set/difference src-ids dest-ids)]
+    (load-missing-boosts! dest-conn src-conn uniq-to-src)))
 
 (defn ten-minutes-ago []
   (let [now (/ (System/currentTimeMillis) 1000)
@@ -140,20 +140,24 @@
                                          :url "https://100.120.212.39:8080/v1/invoices")
          (db/add-boosts conn))))
 
-
-
 (alter-var-root #'*out* (constantly *out*))
 
 (defn -main [& args]
   (let [lnd-conn (d/get-conn db/lnd-dbi db/schema)
         alby-conn (d/get-conn db/alby-dbi db/schema)
         nodecan-conn (d/get-conn db/nodecan-dbi db/schema)
+        _ (let [env (System/getenv)
+                {:keys [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE]} (zipmap (map keyword (keys env)) (vals env))]
+            (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE))
+              (throw (ex-info "Missing required credentials!" {:jbnode JBNODE_MACAROON_PATH :nodecan NODECAN_MACAROON_PATH :alby ALBY_ACCESS_CODE}))))
         lnd-macaroon (lnd/read-macaroon (System/getenv "JBNODE_MACAROON_PATH"))
         nodecan-macaroon (lnd/read-macaroon (System/getenv "NODECAN_MACAROON_PATH"))
         alby-token (System/getenv "ALBY_ACCESS_CODE")
         runtime (Runtime/getRuntime)
+        webserver (web/-main lnd-conn)
         shutdown-hook (Thread. (fn []
                                  (println "stopping scraper")
+                                 (.close webserver)
                                  (reset! lnd/scrape-can-run false)
                                  (reset! alby/scrape-can-run false)
                                  (d/close lnd-conn)
@@ -162,27 +166,32 @@
         _ (.addShutdownHook runtime shutdown-hook)
         lnd-polling-thread (Thread. (fn []
                                       (while true
-                                        (println "scraping lnd")
-                                        (autoscrape-lnd lnd-conn lnd-macaroon 500)
-                                        (println "sleeping")
-                                        (Thread/sleep 10000))))
+                                        (try
+                                          (println "scraping lnd")
+                                          (autoscrape-lnd lnd-conn lnd-macaroon 500)
+                                          (println "sleeping")
+                                          (Thread/sleep 10000)
+                                          (catch Exception e (println (bean e)))))))
         alby-polling-thread (Thread. (fn []
                                        (while true
-                                         (println "scraping alby")
-                                         (autoscrape-alby alby-conn alby-token 3000)
-                                         (println "syncing to jbnode")
-                                         (sync-mising-boosts! lnd-conn alby-conn (ten-minutes-ago))
-                                         (println "sleeping")
-                                         (Thread/sleep 60000))))
+                                         (try
+                                           (println "scraping alby")
+                                           (autoscrape-alby alby-conn alby-token 3000)
+                                           (println "syncing to jbnode")
+                                           (sync-mising-boosts! lnd-conn alby-conn (ten-minutes-ago))
+                                           (println "sleeping")
+                                           (Thread/sleep 60000)
+                                           (catch Exception e (println (bean e)))))))
         nodecan-polling-thread (Thread. (fn []
-                                       (while true
-                                         (println "scraping nodecan")
-                                         (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
-                                         (println "syncing to jbnode")
-                                         (sync-mising-boosts! lnd-conn nodecan-conn (ten-minutes-ago))
-                                         (println "sleeping")
-                                         (Thread/sleep 10000))))
-        ]
+                                          (while true
+                                            (try
+                                              (println "scraping nodecan")
+                                              (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
+                                              (println "syncing to jbnode")
+                                              (sync-mising-boosts! lnd-conn nodecan-conn (ten-minutes-ago))
+                                              (println "sleeping")
+                                              (Thread/sleep 10000)
+                                              (catch Exception e (println (bean e)))))))]
 
     (.start lnd-polling-thread)
     (.start nodecan-polling-thread)
@@ -233,7 +242,7 @@
                   (scrape-alby-boosts-until-epoch
                    alby-conn
                    alby/test-token
-                   (->epoch #inst "2024-07-01T07:00")
+                   (->epoch #inst "2024-08-17T07:00")
                    2000)))
                (fn [_] (println "alby sync complete")))
 
@@ -242,7 +251,7 @@
                   (scrape-lnd-boosts-until-epoch
                    lnd-conn
                    lnd/macaroon
-                   (->epoch #inst "2024-07-01T07:00")
+                   (->epoch #inst "2024-08-17T07:00")
                    50)))
                (fn [_] (println "lnd sync complete")))
 
@@ -251,7 +260,7 @@
                   (scrape-nodecan-boosts-until-epoch
                    nodecan-conn
                    lnd/nodecan-macaroon
-                   (->epoch #inst "2024-07-01T07:00")
+                   (->epoch #inst "2024-08-17T07:00")
                    500)))
                (fn [_] (println "nodecan sync complete")))
 
@@ -265,8 +274,8 @@
        (sort-by :invoice/creation_date)
        (spit "/tmp/after_sync"))
 
-  (->> (->epoch #inst "2024-08-05T06:00") #_1721921839
-       (boost-scraper.reports/boost-report lnd-conn #"(?i).*Self-Hosted.*")
+  (->> #_(->epoch #inst "2024-08-05T06:00")   1724611594
+       (boost-scraper.reports/boost-report lnd-conn #"(?i).*unplugged.*")
        #_(into [] cat)
        #_(sort-by :invoice/creation_date)
        (spit "/tmp/lnd.md"))
@@ -376,5 +385,4 @@
 
   (d/close alby-conn)
   (d/close lnd-conn)
-  (d/close nodecan-conn)
-  )
+  (d/close nodecan-conn))

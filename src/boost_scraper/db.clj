@@ -92,7 +92,7 @@
           remove-nil-vals
           (#(namespace-invoice-keys :boostagram %))
           (#(flatten-paths "/" %))))
-    (catch Exception e (println "EXCEPTION DECODING BOOST: " rawboost debug) {})))
+    (catch Exception e (println "EXCEPTION DECODING BOOST: " rawboost debug (bean e)) {})))
 
 (defn decode-keysend [rawboost debug]
   (try
@@ -101,7 +101,7 @@
           (.decode rawboost)
           (#(java.lang.String. %))
           (#(hash-map :invoice/keysend %))))
-    (catch Exception e (println "EXCEPTION DECODING KEYSEND: " rawboost debug) {})))
+    (catch Exception e (println "EXCEPTION DECODING KEYSEND: " rawboost debug (bean e)) {})))
 
 (defn sha256 [string]
   (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes string "UTF-8"))]
@@ -185,26 +185,12 @@
                   invoice)
         invoice (if-let [[{custom_records :custom_records}] (get invoice :invoice/htlcs)]
                   (let [keysend (when-let [rawkeysend (get custom_records :34349334)]
+                                  ;; From LND; if present parse into keysend data.
                                   (decode-keysend rawkeysend custom_records))
-                        boost (when-let [rawboost (get custom_records :7629169) ]
+                        boost (when-let [rawboost (get custom_records :7629169)]
+                                ;; From LND; if present parse into boostagram data.
                                 (decode-boost rawboost custom_records))]
                     (reduce into invoice (remove empty? [keysend boost])))
-                  invoice)
-        ;; From LND; if present parse into boostagram data.
-        #_invoice #_(if-let [[{{rawboost :7629169} :custom_records} :as debug] (get invoice :invoice/htlcs)]
-                  (do #_(println debug "\n")
-                   (into
-                    invoice
-                    #_(dissoc invoice :invoice/htlcs)
-                    (decode-boost rawboost debug)))
-                  invoice)
-        ;; From LND; if present parse into keysend data.
-        #_invoice #_(if-let [[{{rawkeysend :34349334} :custom_records} :as debug] (get invoice :invoice/htlcs)]
-                  (do (println "KEYSENDING")
-                      (into
-                       invoice
-                       #_(dissoc invoice :invoice/htlcs)
-                       (decode-keysend rawkeysend debug)))
                   invoice)
         invoice (dissoc invoice :invoice/htlcs)
         ;; Noramlize sender name.
