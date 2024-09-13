@@ -13,7 +13,7 @@
          ;; [?last :invoice/identifier ?last-seen']
          ;; [?last :invoice/creation_date ?last_creation_date]
          [?e :invoice/creation_date ?creation_date]
-         [(< ?last-seen-timestamp' ?creation_date)]
+         [(clojure.core/< ?last-seen-timestamp' ?creation_date)]
          ;; filter out those troublemakers
          (not [?e :boostagram/sender_name_normalized "chrislas"])
          (not [?e :boostagram/sender_name_normalized "noblepayne"])
@@ -37,7 +37,7 @@
                 ;; [?last :invoice/identifier ?last-seen']
                 ;; [?last :invoice/creation_date ?last_creation_date]
                 [?e :invoice/creation_date ?creation_date]
-                ;; FIXME: why does using `<` not work sometimes? Should be faster than using core fn
+                ;; !!! FIXME: why does using `<` not work sometimes? Should be faster than using core fn
                 [(clojure.core/< ?last-seen-timestamp' ?creation_date)]
                 ;; filter out those troublemakers
                 (not [?e :boostagram/sender_name_normalized "chrislas"])
@@ -63,7 +63,7 @@
                 :in $ [[?e] ...] ?maxcd'
                 :where
                 [?e :invoice/creation_date ?cd]
-                [(<= ?cd ?maxcd')]]
+                [(clojure.core/<= ?cd ?maxcd')]]
                $ ?valid_eids ?last_seen_id)
           ?valid_eids_before_maxcd]
          ;; aggregate boosts by sender_name_normalized
@@ -98,22 +98,22 @@
          ;; ballers
          [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'
                 :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'] ...]
-                :where [(<= 20000 ?sat_total')]]
+                :where [(clojure.core/<= 20000 ?sat_total')]]
                $ ?sats_by_eid_with_deets)
           ?ballers]
          ;; boosts
          [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'
                 :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'] ...]
                 :where
-                [(<= 2000 ?sat_total')]
-                [(< ?sat_total' 20000)]]
+                [(clojure.core/<= 2000 ?sat_total')]
+                [(clojure.core/< ?sat_total' 20000)]]
                $ ?sats_by_eid_with_deets)
           ?boosts]
          ;; thanks
          [(d/q [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'
                 :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts'] ...]
                 :where
-                [(< ?sat_total' 2000)]]
+                [(clojure.core/< ?sat_total' 2000)]]
                $ ?sats_by_eid_with_deets)
           ?thanks]
          ;; boost summary
