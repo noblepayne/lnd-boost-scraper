@@ -28,20 +28,24 @@
        "\n + " (reports/int-comma value_sat_total) " sats"
        "\n + " podcast " / " episode
        "\n + " app_name " " created_at " (" creation_date ")"
-       "\n" (clojure.string/join "\n" (map #(str "   > " %)
-                                           (clojure.string/split-lines (or message ""))))
+       "\n" (str/join "\n" (map #(str "   > " %)
+                                           (str/split-lines (or message ""))))
        "\n"))
 
-(defn unique-content-ids [conn since]
-  (first (d/q '[:find [(distinct ?cid)]
-                :in $ ?since
+(defn unique-content-ids
+  ([conn since] (unique-content-ids conn since (/ (System/currentTimeMillis) 1000)))
+  ([conn since stop]
+   (into #{} cat
+         (d/q '[:find ?cid
+                :in $ ?since ?stop
                 :where
                 #_[?e :boostagram/action "boost"]
                 [?e :invoice/creation_date ?cd]
-                [(< ?since ?cd)]
-                [?e :boostagram/content_id ?cid]]
+                [?e :boostagram/content_id ?cid]
+                [(clojure.core/< ?since ?cd ?stop)]]
               (d/db conn)
-              since)))
+              since
+              stop))))
 
 (defn find-similar [conn action snn timestamp delta]
   (d/q '[:find [(d/pull ?e [:*]) ...]
@@ -70,16 +74,40 @@
         entities (map #(dissoc % :db/id) entities)]
     (d/transact! dest-conn entities)))
 
+(def max-allowed-time-for-boost
+  "10 minutes
+   
+  This value defines the maximum time we expect a boost to take to send to all splits.
+
+  A boost may have many splits, and these are often sent serially. Thus,
+  it takes some for a boost to send to all splits. When we sync from two sources
+  it is possible that during a single scrape cycle, one source has received the boost
+  while another has not. When performing a sync of missing boosts, it is possible that
+  the 'syncing from' db has the boost, while the 'syncing to' db does not, but will shortly.
+  We would then incorrectly sync that boost to the 'syncing to' db, only for it to then
+  receive the same boost some time after, resulting in a duplicate.
+   
+  Our solution is to implement a capped lookback window when syncing missing boosts.
+  This window has both a start and a stop, with the stop being set by the value defined here.
+
+  N.B. this window is only applied when pulling content ids from the 'syncing from' db."
+  (* 60 10))
+
+(defn sync-lookback-stop []
+  (let [now (/ (System/currentTimeMillis) 1000)
+        lookback-stop (- now max-allowed-time-for-boost)]
+    lookback-stop))
+
 (defn sync-mising-boosts! [dest-conn src-conn since]
   (let [dest-ids (unique-content-ids dest-conn since)
-        src-ids (unique-content-ids src-conn since)
+        src-ids (unique-content-ids src-conn since (sync-lookback-stop))
         uniq-to-src (clojure.set/difference src-ids dest-ids)]
     (load-missing-boosts! dest-conn src-conn uniq-to-src)))
 
-(defn ten-minutes-ago []
+(defn two-days-ago []
   (let [now (/ (System/currentTimeMillis) 1000)
-        ten-minutes-ago (- now (* 10 60))]
-    ten-minutes-ago))
+        two-days-ago (- now (* 60 60 24 2))]
+    two-days-ago))
 
 #_(defn scrape-boosts-since [conn token items-per-page wait since]
     (->> (alby/get-all-boosts token items-per-page :wait wait :since since)
@@ -143,16 +171,27 @@
                                          :url "https://100.120.212.39:8080/v1/invoices")
          (db/add-boosts conn))))
 
+(defn q
+  "A version of d/q with sorted maps as output."
+  [& args]
+  (into []
+        (comp cat (map #(into (sorted-map) %)))
+        (apply d/q args)))
+
 (alter-var-root #'*out* (constantly *out*))
 
+(def scrape-sleep-interval 60000)
+
 (defn -main [& args]
+  ;; TODO: proper startup validation
+  (let [env (System/getenv)
+        {:keys [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE]} (zipmap (map keyword (keys env)) (vals env))]
+    (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE))
+      (println "Missing required credentials!" {:jbnode JBNODE_MACAROON_PATH :nodecan NODECAN_MACAROON_PATH :alby ALBY_ACCESS_CODE})
+      (System/exit 1)))
   (let [lnd-conn (d/get-conn db/lnd-dbi db/schema)
         alby-conn (d/get-conn db/alby-dbi db/schema)
         nodecan-conn (d/get-conn db/nodecan-dbi db/schema)
-        _ (let [env (System/getenv)
-                {:keys [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE]} (zipmap (map keyword (keys env)) (vals env))]
-            (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE))
-              (throw (ex-info "Missing required credentials!" {:jbnode JBNODE_MACAROON_PATH :nodecan NODECAN_MACAROON_PATH :alby ALBY_ACCESS_CODE}))))
         lnd-macaroon (lnd/read-macaroon (System/getenv "JBNODE_MACAROON_PATH"))
         nodecan-macaroon (lnd/read-macaroon (System/getenv "NODECAN_MACAROON_PATH"))
         alby-token (System/getenv "ALBY_ACCESS_CODE")
@@ -166,42 +205,26 @@
                                  (d/close lnd-conn)
                                  (d/close nodecan-conn)
                                  (d/close alby-conn)))
-        _ (.addShutdownHook runtime shutdown-hook)
-        lnd-polling-thread (Thread. (fn []
-                                      (while true
-                                        (try
-                                          (println "scraping lnd")
-                                          (autoscrape-lnd lnd-conn lnd-macaroon 500)
-                                          (println "sleeping")
-                                          (Thread/sleep 10000)
-                                          (catch Exception e (println (bean e)))))))
-        alby-polling-thread (Thread. (fn []
-                                       (while true
-                                         (try
-                                           (println "scraping alby")
-                                           (autoscrape-alby alby-conn alby-token 3000)
-                                           (println "syncing to jbnode")
-                                           (sync-mising-boosts! lnd-conn alby-conn (ten-minutes-ago))
-                                           (println "sleeping")
-                                           (Thread/sleep 60000)
-                                           (catch Exception e (println (bean e)))))))
-        nodecan-polling-thread (Thread. (fn []
-                                          (while true
-                                            (try
-                                              (println "scraping nodecan")
-                                              (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
-                                              (println "syncing to jbnode")
-                                              (sync-mising-boosts! lnd-conn nodecan-conn (ten-minutes-ago))
-                                              (println "sleeping")
-                                              (Thread/sleep 10000)
-                                              (catch Exception e (println (bean e)))))))]
-
-    (.start lnd-polling-thread)
-    (.start nodecan-polling-thread)
-    (.start alby-polling-thread)
-    (.join lnd-polling-thread)
-    (.join nodecan-polling-thread)
-    (.join alby-polling-thread)))
+        _ (.addShutdownHook runtime shutdown-hook)]
+    (while true
+      (try
+          (println "Starting Scrape Cycle...")
+          (println "Scraping Alby")
+          (autoscrape-alby alby-conn alby-token 3000)
+          (println)
+          (println "Scraping NodeCan LND")
+          (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
+          (println)
+          (println "Scraping JB LND")
+          (autoscrape-lnd lnd-conn lnd-macaroon 500)
+          (println)
+          (println "Syncing missing boosts")
+          (sync-mising-boosts! lnd-conn nodecan-conn (two-days-ago))
+          (sync-mising-boosts! lnd-conn alby-conn (two-days-ago))
+          (println)
+          (println "Scrape Cycle finished, sleeping.")
+          (Thread/sleep scrape-sleep-interval)
+        (catch Exception e (println "ERROR WHILE SCRAPING! " (bean e)))))))
 
 (comment
   (require '[portal.api :as p])
