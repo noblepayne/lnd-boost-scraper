@@ -42,7 +42,7 @@
                 #_[?e :boostagram/action "boost"]
                 [?e :invoice/creation_date ?cd]
                 [?e :boostagram/content_id ?cid]
-                [(clojure.core/< ?since ?cd ?stop)]]
+                [(< ?since ?cd ?stop)]]
               (d/db conn)
               since
               stop))))
@@ -54,7 +54,7 @@
          [?e :boostagram/action ?action]
          [?e :boostagram/sender_name_normalized ?snn]
          [?e :invoice/creation_date ?cd]
-         [(clojure.core/<= ?start ?cd ?stop)]]
+         [(<= ?start ?cd ?stop)]]
        (d/db conn)
        action
        snn
@@ -396,7 +396,7 @@
          :in $ ?last
          :where
          [?e :invoice/creation_date ?cd]
-         [(clojure.core/< ?last ?cd)]]
+         [(< ?last ?cd)]]
        (d/db lnd-conn)
        (->epoch #inst "2024-08-10T20:00"))
 
