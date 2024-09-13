@@ -4,7 +4,6 @@
             [clojure.instant]
             [clojure.string :as str]))
 
-#_(def dbi "/media/wes/a8dc84bb-2377-490e-a4b3-027425850e03/workdir/boosts/boostdb")
 (def alby-dbi "/home/wes/Downloads/boostdb/alby_boostdb")
 (def lnd-dbi "/home/wes/Downloads/boostdb/lnd_boostdb")
 (def nodecan-dbi "/home/wes/Downloads/boostdb/nodecan_boostdb")

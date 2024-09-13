@@ -48,7 +48,6 @@
         (println "waiting...")
         (Thread/sleep wait)
         (println "DONE WAITING"))
-      #_(reset! get-boosts-state (:next next_))
       next_)))
 
 (defn get-all-boosts [macaroon & get-boost-args]
