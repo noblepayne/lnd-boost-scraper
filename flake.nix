@@ -45,6 +45,7 @@
                     vscodeExtensions = [
                       pkgs.vscode-extensions.betterthantomorrow.calva
                       pkgs.vscode-extensions.vscodevim.vim
+                      pkgs.vscode-extensions.jnoortheen.nix-ide
                     ];
                   })
                 ];
