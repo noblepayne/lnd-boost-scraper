@@ -29,7 +29,7 @@
        "\n + " podcast " / " episode
        "\n + " app_name " " created_at " (" creation_date ")"
        "\n" (str/join "\n" (map #(str "   > " %)
-                                           (str/split-lines (or message ""))))
+                                (str/split-lines (or message ""))))
        "\n"))
 
 (defn unique-content-ids
@@ -208,22 +208,22 @@
         _ (.addShutdownHook runtime shutdown-hook)]
     (while true
       (try
-          (println "Starting Scrape Cycle...")
-          (println "Scraping Alby")
-          (autoscrape-alby alby-conn alby-token 3000)
-          (println)
-          (println "Scraping NodeCan LND")
-          (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
-          (println)
-          (println "Scraping JB LND")
-          (autoscrape-lnd lnd-conn lnd-macaroon 500)
-          (println)
-          (println "Syncing missing boosts")
-          (sync-mising-boosts! lnd-conn nodecan-conn (two-days-ago))
-          (sync-mising-boosts! lnd-conn alby-conn (two-days-ago))
-          (println)
-          (println "Scrape Cycle finished, sleeping.")
-          (Thread/sleep scrape-sleep-interval)
+        (println "Starting Scrape Cycle...")
+        (println "Scraping Alby")
+        (autoscrape-alby alby-conn alby-token 3000)
+        (println)
+        (println "Scraping NodeCan LND")
+        (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
+        (println)
+        (println "Scraping JB LND")
+        (autoscrape-lnd lnd-conn lnd-macaroon 500)
+        (println)
+        (println "Syncing missing boosts")
+        (sync-mising-boosts! lnd-conn nodecan-conn (two-days-ago))
+        (sync-mising-boosts! lnd-conn alby-conn (two-days-ago))
+        (println)
+        (println "Scrape Cycle finished, sleeping.")
+        (Thread/sleep scrape-sleep-interval)
         (catch Exception e (println "ERROR WHILE SCRAPING! " (bean e)))))))
 
 (comment

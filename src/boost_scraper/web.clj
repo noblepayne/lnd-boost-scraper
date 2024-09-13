@@ -44,7 +44,6 @@
 ;; TODO: consolidate CSS?
 (defn get-boosts [db-conn]
   (fn [request]
-    (require '[datalevin.core :as d]) ;; FIXME: why is this needed? optimize? pre-load? refactor? subqueries?
     (let [{{:strs [show since]} :params} request
           default-since (two-weeks-ago)]
       {:status 200
@@ -149,6 +148,7 @@
   (http/start-server (app db-conn) {:port 9999}))
 
 (comment
-  (def server (http/start-server (app boost-scraper.core/lnd-conn) {:port 9999}))
+  (def app_ (app boost-scraper.core/lnd-conn))
+  (def server (http/start-server #'app_ {:port 9999})) ;; `#'` allows reloading by redef-ing app
   (.close server)
   (->  "http://localhost:9999/ping" httpc/get :body print))
