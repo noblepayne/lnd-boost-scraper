@@ -1,4 +1,6 @@
 (ns boost-scraper.core
+  {:clj-kondo/config '{:lint-as {datalevin.core/with-transaction clojure.core/let}
+                       :linters {:unresolved-symbol {:exclude [(datalevin.core/with-conn)]}}}}
   (:gen-class)
   (:require [boost-scraper.db :as db]
             [boost-scraper.reports :as reports]
@@ -6,6 +8,7 @@
             [boost-scraper.upstreams.alby :as alby]
             [boost-scraper.web :as web]
             [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.set :as set]
             [clojure.instant]
             [datalevin.core :as d]))
@@ -47,7 +50,7 @@
          [?e :boostagram/action ?action]
          [?e :boostagram/sender_name_normalized ?snn]
          [?e :invoice/creation_date ?cd]
-         [(<= ?start ?cd ?stop)]]
+         [(clojure.core/<= ?start ?cd ?stop)]]
        (d/db conn)
        action
        snn
@@ -242,7 +245,7 @@
                   (scrape-alby-boosts-until-epoch
                    alby-conn
                    alby/test-token
-                   (->epoch #inst "2024-08-17T07:00")
+                   (->epoch #inst "2024-08-01T07:00")
                    2000)))
                (fn [_] (println "alby sync complete")))
 
@@ -251,7 +254,7 @@
                   (scrape-lnd-boosts-until-epoch
                    lnd-conn
                    lnd/macaroon
-                   (->epoch #inst "2024-08-17T07:00")
+                   (->epoch #inst "2024-08-01T07:00")
                    50)))
                (fn [_] (println "lnd sync complete")))
 
@@ -260,7 +263,7 @@
                   (scrape-nodecan-boosts-until-epoch
                    nodecan-conn
                    lnd/nodecan-macaroon
-                   (->epoch #inst "2024-08-17T07:00")
+                   (->epoch #inst "2024-08-01T07:00")
                    500)))
                (fn [_] (println "nodecan sync complete")))
 
@@ -370,7 +373,7 @@
          :in $ ?last
          :where
          [?e :invoice/creation_date ?cd]
-         [(< ?last ?cd)]]
+         [(clojure.core/< ?last ?cd)]]
        (d/db lnd-conn)
        (->epoch #inst "2024-08-10T20:00"))
 
