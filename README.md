@@ -17,73 +17,64 @@
 * [Built With](#built-with)
 * [Getting Started](#getting-started)
   * [Prerequisites](#prerequisites)
-  * [Installation](#installation)
 * [Usage](#usage)
 * [Roadmap](#roadmap)
 * [Contributing](#contributing)
 * [License](#license)
 
 ## About The Project
+Fetches invoices from the LND or Alby Wallet API and outputs formatted boosts in show-notes appropriate markdown. 
 
-A minimum viable boost scraper. Fetches invoices from the LND or Alby Wallet API and outputs formatted boosts in show-notes appropriate markdown. 
-
-Initial version requires an LND macaroon or personal alby token.
+- Most invoice and boost data is stored in a local database for easy analytics and fast retrieval.
+- Supports managing multiple nodes/dbs and syncing missing boosts into a "source of truth" database.
+- Supports both LND and Alby as upstream invoice sources.
+- Generates markdown-formatted reports suitable for Jupiter Broadcasting style show notes.
+- Offers a simple web interface for exporting boost data.
 
 ## Built With
 
-* [Babashka](https://babashka.org)
+* [Clojure](https://clojure.org)
+* [Datalevin](https://github.com/juji-io/datalevin)
+* [Nix](https://nixos.org/)
+* [devenv](https://devenv.sh/)
+* [clj-nix](https://github.com/jlesquembre/clj-nix)
 * [Alby](https://getalby.com)
+* [LND](https://github.com/lightningnetwork/lnd)
+* and many more wonderful FOSS components.
 
 ## Getting Started
-
-TODO
+TODO ...
 
 ### Prerequisites
-
-TODO
-
-### Installation
-
-TODO
+TODO: document necessary config/env vars.
+- nix
+- LND Macaroon(s)
+- Alby Token(s)
 
 ## Usage
+First, make sure to define the necessary env vars for your upstreams. Then run the project.
 
-TODO
+```sh
+$ nix run github:noblepayne/lnd-boost-scraper
+```
 
 ## Roadmap
+This list is a WIP.
 
-See the [open issues](https://github.com/noblepayne/lnd-boost-scraper/issues) for a list of proposed features (and known issues).
-
-Also the following TODOs:
-- TODO: document using age to manually update secrets.
+- [ ] Load Alby token from file whose path is given by env var
+- [ ] Add NixOS Module
+- [ ] Observability
+- [ ] Tests
+- [ ] General refactor and cleanup
+  - [ ] Configuration file
+  - [ ] Data-oriented approach to defining upstreams
+  - [ ] Make podcast definitions modular.
+  - [ ] Anything else needed to use outside of JB.
 
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-* If you have suggestions for adding or removing projects, feel free to [open an issue](https://github.com/noblepayne/lnd-boost-scraper/issues/new) to discuss it, or directly create a pull request after you edit the *README.md* file with necessary changes.
-* Please make sure you check your spelling and grammar.
-* Create individual PR for each suggestion.
-
-### Creating A Pull Request
-
-1. Fork the Project
-2. Create your Feature Branch (`git switch -c feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push -u origin feature/AmazingFeature`)
-5. Open a Pull Request
+* If you have suggestions for improving the project, feel free to [open an issue](https://github.com/noblepayne/lnd-boost-scraper/issues/new) to discuss it, or directly create a pull request.
 
 ## License
 
 Distributed under the MIT License. See [LICENSE](https://github.com/noblepayne/lnd-boost-scraper/blob/main/LICENSE.md) for more information.
-
-
-
-
-### Token Hackery
-```
-window.indexedDB.open("invoiceDb").onsuccess = (event) => {event.target.result.transaction("authTable").objectStore("authTable").get(1).onsuccess = (event) => {alert(event.target.result.authStatus.oauthTokens.accessToken);};};
-
-window.indexedDB.open("invoiceDb").onsuccess = (event) => {event.target.result.transaction("authTable").objectStore("authTable").get(1).onsuccess = (event) => {alert(event.target.result.authStatus.oauthTokens.refreshToken);};};
-
-alert(JSON.parse(localStorage.getItem("conshax-strg") %7C%7C '%7B"oauthToken"%3A "NO TOKEN FOUND"%7D')%5B"oauthToken"%5D)%3B%7D)
-```

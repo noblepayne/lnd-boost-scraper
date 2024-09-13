@@ -9,9 +9,6 @@
   (d/q '[:find (d/pull ?e [:db/id :invoice/creation_date :boostagram/content_id :boostagram/value_sat_total])
          :in $ ?regex' ?last-seen-timestamp'
          :where
-         ;; find invoices after our last seen id
-         ;; [?last :invoice/identifier ?last-seen']
-         ;; [?last :invoice/creation_date ?last_creation_date]
          [?e :invoice/creation_date ?creation_date]
          [(clojure.core/< ?last-seen-timestamp' ?creation_date)]
          ;; filter out those troublemakers
@@ -33,9 +30,6 @@
          [(d/q [:find ?e
                 :in $ ?regex' ?last-seen-timestamp'
                 :where
-                ;; find invoices after our last seen id
-                ;; [?last :invoice/identifier ?last-seen']
-                ;; [?last :invoice/creation_date ?last_creation_date]
                 [?e :invoice/creation_date ?creation_date]
                 ;; !!! FIXME: why does using `<` not work sometimes? Should be faster than using core fn
                 [(clojure.core/< ?last-seen-timestamp' ?creation_date)]
@@ -58,7 +52,7 @@
                $ ?valid_eids)
           ?maxcd]
          [(first ?maxcd) ?last_seen_id]
-         ;; limit eids
+         ;; limit eids by max boost creation_date
          [(d/q [:find ?e
                 :in $ [[?e] ...] ?maxcd'
                 :where
@@ -127,8 +121,8 @@
                 [?e :boostagram/sender_name_normalized ?sender]]
                $ ?valid_eids_before_maxcd)
           ?summary']
-         [(or (first ?summary') [0 0 0]) ?summary]
          ;; handle empty results. having a nil here short circuits the whole query
+         [(or (first ?summary') [0 0 0]) ?summary]
          ;; stream summary
          [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
                 :in $ [[?e] ...]
@@ -140,6 +134,7 @@
                 [?e :boostagram/sender_name_normalized ?sender]]
                $ ?valid_eids_before_maxcd)
           ?stream_summary']
+         ;; handle empty results. having a nil here short circuits the whole query
          [(or (first ?stream_summary') [0 0 0]) ?stream_summary]
          ;; total summary
          [(d/q [:find (sum ?sats) (count ?e) (count-distinct ?sender)
@@ -150,15 +145,8 @@
                 [?e :boostagram/sender_name_normalized ?sender]]
                $ ?valid_eids_before_maxcd)
           ?total_summary']
-         [(or (first ?total_summary') [0 0 0]) ?total_summary]
-          ;; TODO needed? find ID corresponding to max timestamp
-         #_[(d/q [:find [?total_sat_sum ?last_seen_id ?distinct_senders]
-                  :in $ [?total_sat_sum ?last_cd ?distinct_senders]
-                  :where
-                  [?e :invoice/creation_date ?last_cd]
-                  [?e :invoice/identifier ?last_seen_id]]
-                 $ ?total_summary_p1)
-            ?total_summary]]
+         ;; handle empty results. having a nil here short circuits the whole query
+         [(or (first ?total_summary') [0 0 0]) ?total_summary]]
        (d/db conn) show-regex last-seen-timestamp))
 
 (defn sort-report
