@@ -58,6 +58,8 @@
             (not [?e :boostagram/sender_name_normalized "testwes11"])
             (not [?e :boostagram/sender_name_normalized "testwes12"])
             (not [?e :boostagram/sender_name_normalized "noblepayne-nope"])
+            (not [?e :boostagram/sender_name_normalized "noblepayne-test"])
+            (not [?e :boostagram/sender_name_normalized "breezywes"])
                 ;; match our particular show
             [?e :boostagram/podcast ?podcast]
             [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]

@@ -30,7 +30,7 @@
 
 ;; Routes
 (def show->regex
-  {"All Shows" "(?i).*"
+  {"All Shows" ".*"
    "LINUX Unplugged" "(?i).*unplugged.*"
    "Coder Radio" "(?i).*coder.*"
    "Self-Hosted" "(?i).*hosted.*"
@@ -79,6 +79,7 @@
              [:div
               [:h1 [:a {:href "/boosts" :style {:color "inherit" :text-decoration-color "inherit"}} "Boost Report"]]
               (if (not (and show since))
+                ;; Query form
                 [:form {:action "/boosts"}
                  [:label {:for "showselect"} "Show:"]
                  [:select#showselect {:name "show"}
@@ -88,6 +89,7 @@
                  [:label {:for "since"} "Last Seen Timestamp:"]
                  [:input#since {:name "since" :type "text" :value default-since}]
                  [:input {:type "submit" :value "Get Boosts!"}]]
+                ;; Query results
                 (let [show (re-pattern show)
                       since (Integer/parseInt since)
                       report (reports/boost-report db-conn show since)]
@@ -137,6 +139,10 @@
    (ring/router
     (routes db-conn)
     {:data {:muuntaja m/instance
+            ;; IDEA: always be async? by which I mean, always return a deferred.
+            ;; have a middleware that detects if not a deferred and wraps, then takes
+            ;; the async route the rest of the way up/out. This may be already possible given wrap-aleph-handler.
+            ;; Downsides? Seems simpler/better than current situation.
             :middleware [wrap-ring-async-handler
                          muuntaja/format-middleware
                          reitit.ring.middleware.parameters/parameters-middleware
@@ -148,7 +154,7 @@
   (http/start-server (app db-conn) {:port 9999}))
 
 (comment
-  (def app_ (app boost-scraper.core/lnd-conn))
+  (def app_ (app boost-scraper.core/nodecan-conn))
   (def server (http/start-server #'app_ {:port 9999})) ;; `#'` allows reloading by redef-ing app
   (.close server)
   (->  "http://localhost:9999/ping" httpc/get :body print))

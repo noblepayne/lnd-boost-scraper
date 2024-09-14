@@ -28,6 +28,7 @@
    :boostagram/message {:db/valueType :db.type/string}
    :boostagram/value_msat_total {:db/valueType :db.type/long}
    :boostagram/value_sat_total {:db/valueType :db.type/long}
+   :scraper/source {:db/valueType :db.type/string}
    :boostagram/content_id {:db/valueType :db.type/string
                            ;; TODO: enable uniqueness after we're sure this is unique enough
                            ;; N.B. how does it work for streams? What is someone streams the same show twice?
@@ -220,8 +221,10 @@
         #_(map #(into (sorted-map) %))
         batch))
 
-(defn add-boosts [conn boosts]
+(defn add-boosts [conn source-name boosts]
   (->> boosts
        (map process-batch)
+       ;; TODO: integrate into process-batch
+       (map (fn [batch] (map #(assoc % :scraper/source source-name) batch)))
        (run! (fn [boost-batch]
                (d/transact! conn boost-batch)))))

@@ -62,6 +62,7 @@ $ nix run github:noblepayne/lnd-boost-scraper
 This list is a WIP.
 
 - [ ] Load Alby token from file whose path is given by env var
+- [x] Add autoscrape history limit: use this value instead of last seen timestamp for autoscrape with fresh db
 - [ ] Add NixOS Module
 - [ ] Observability
 - [ ] Tests

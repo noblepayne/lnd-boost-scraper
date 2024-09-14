@@ -70,6 +70,7 @@
           (let [filtered-batch (filter :creation_date boost-batch)
                 creation_dates (map (comp #(Integer/parseInt %) :creation_date) filtered-batch)
                 first_creation_date (apply max creation_dates)]
+            ;; TODO: tests; <= or <?
             (<= epoch first_creation_date))))))
 
 (comment
