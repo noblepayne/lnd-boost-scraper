@@ -1,23 +1,21 @@
 {:paths ["src" "resources"]
- :deps  {org.clojure/clojure {:mvn/version "1.11.4"}
-         ;; concurenncy
-         org.clojure/core.async {:mvn/version "1.6.681"}
+ :deps  {org.clojure/clojure {:mvn/version "1.12.0"}
          ;; database
          datalevin/datalevin {:mvn/version "0.9.10"}
          ;; HTTP
          cheshire/cheshire {:mvn/version "5.13.0"}
-         hato/hato {:mvn/version "0.9.0"}
          org.babashka/http-client {:mvn/version "0.3.11"}
          aleph/aleph {:mvn/version "0.8.1"}
          metosin/reitit {:mvn/version "0.7.1"}
          metosin/muuntaja {:mvn/version "0.6.10"}
+         ;; markdown and hiccup
          com.kiranshila/cybermonday {:mvn/version "0.6.215"}
          dev.onionpancakes/chassis {:mvn/version "1.0.365"}
          ;; validation
          metosin/malli {:mvn/version "0.16.3"}
          ;; config
          aero/aero {:mvn/version "1.1.6"}
-         ;; cli
+         ;; cli interface
          org.babashka/cli {:mvn/version "0.8.60"}}
  :aliases
  {:jvm-base {:jvm-opts [;; required by datalevin

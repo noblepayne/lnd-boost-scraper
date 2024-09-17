@@ -1,17 +1,17 @@
 (ns boost-scraper.web
   (:require [aleph.http :as http]
-            [reitit.ring :as ring]
-            [manifold.deferred :as md]
-            [cybermonday.core :as cm]
-            [muuntaja.core :as m]
-            [reitit.ring.middleware.parameters]
-            [reitit.ring.middleware.muuntaja :as muuntaja]
-            [dev.onionpancakes.chassis.core :as html]
-            [hato.client :as httpc]
+            [babashka.http-client :as httpc]
+            [boost-scraper.reports :as reports]
             [clojure.java.io :as io]
             [clojure.math :as math]
             [clojure.string :as str]
-            [boost-scraper.reports :as reports]))
+            [cybermonday.core :as cm]
+            [dev.onionpancakes.chassis.core :as html]
+            [manifold.deferred :as mf]
+            [muuntaja.core :as m]
+            [reitit.ring :as ring]
+            [reitit.ring.middleware.parameters]
+            [reitit.ring.middleware.muuntaja :as muuntaja]))
 
 ;; CSS
 (def pico-fluid-classless
@@ -106,55 +106,52 @@
 ;; Top Level HTTP
 (defn routes [db-conn]
   [["/ping"
-    {:get {:handler (fn [_] {:status 200 :body "pong\n"})}}]
-   ["/boosts" {:get {:handler (get-boosts db-conn)
-                     :data {:async? false}}}]])
+    {:get {:handler (fn [_] (Thread/sleep 10000)
+                      {:status 200 :body "pong\n"})}}]
+   ["/boosts" {:get {:handler (get-boosts db-conn)}}]])
 
-(defn wrap-aleph-handler
-  "Converts given Aleph-compliant hanlder to asynchronous Ring handler.
-
-   More information about asynchronous Ring handlers and middleware:
-   https://www.booleanknot.com/blog/2016/07/15/asynchronous-ring.html"
-  [handler]
-  (fn
-    ([request]
-     (let [resp (handler request)]
-       (if (md/deferred? resp)
-         (throw (ex-info "Sync route returned deferred." {:request request}))
-         resp)))
-    ([request respond raise]
-     (let [resp (handler request)
-           respd (if (md/deferred? resp) resp (md/success-deferred resp))]
-       (md/on-realized respd respond raise)))))
-
-(def wrap-ring-async-handler
-  {:name ::wrap-ring-async
-   :compile
-   (fn [{:keys [:data]} _]
-     (when (not= false (get data :async?))
-       {:wrap http/wrap-ring-async-handler}))})
-
-(defn app [db-conn]
+(defn http-handler [db-conn]
   (ring/ring-handler
    (ring/router
     (routes db-conn)
     {:data {:muuntaja m/instance
-            ;; IDEA: always be async? by which I mean, always return a deferred.
-            ;; have a middleware that detects if not a deferred and wraps, then takes
-            ;; the async route the rest of the way up/out. This may be already possible given wrap-aleph-handler.
-            ;; Downsides? Seems simpler/better than current situation.
-            :middleware [wrap-ring-async-handler
-                         muuntaja/format-middleware
-                         reitit.ring.middleware.parameters/parameters-middleware
-                         wrap-aleph-handler]}})
+            :middleware [muuntaja/format-middleware
+                         reitit.ring.middleware.parameters/parameters-middleware]}})
    (ring/routes (ring/create-default-handler))))
+
+(defn apply-virtual [f & args]
+  (let [deferred (mf/deferred)]
+    (Thread/startVirtualThread
+     (fn []
+       (try
+         (mf/success! deferred (apply f args))
+         (catch Exception e (mf/error! deferred e)))))
+    deferred))
+
+(defn make-virtual [f]
+  (fn [& args]
+    (let [deferred (mf/deferred)]
+      (Thread/startVirtualThread
+       (fn []
+         (try
+           (mf/success! deferred (apply f args))
+           (catch Exception e (mf/error! deferred e)))))
+      deferred)))
 
 (defn -main
   [db-conn]
-  (http/start-server (app db-conn) {:port 9999}))
+  (http/start-server
+   (make-virtual (http-handler db-conn))
+   {:port 9999
+    ;; When other than :none our handler is run on a thread pool.
+    ;; As we are wrapping our handler in a new virtual thread per request
+    ;; on our own, we have no risk of blocking the (aleph) handler thread and
+    ;; don't need an additional threadpool onto which to offload.
+    :executor :none}))
 
 (comment
-  (def app_ (app boost-scraper.core/nodecan-conn))
-  (def server (http/start-server #'app_ {:port 9999})) ;; `#'` allows reloading by redef-ing app
+
+  (def app_ (make-virtual (http-handler boost-scraper.core/nodecan-conn)))
+  (def server (http/start-server #'app_ {:port 9999 :executor :none})) ;; `#'` allows reloading by redef-ing app
   (.close server)
   (->  "http://localhost:9999/ping" httpc/get :body print))

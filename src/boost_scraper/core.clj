@@ -4,10 +4,10 @@
   (:gen-class)
   (:require [boost-scraper.db :as db]
             [boost-scraper.reports :as reports]
-            [boost-scraper.upstreams.lnd :as lnd]
             [boost-scraper.upstreams.alby :as alby]
+            [boost-scraper.upstreams.lnd :as lnd]
+            [boost-scraper.utils :as utils]
             [boost-scraper.web :as web]
-            [clojure.core.async :as async]
             [clojure.string :as str]
             [clojure.set :as set]
             [clojure.instant]
@@ -218,14 +218,12 @@
     (while true
       (try
         (println "Starting Scrape Cycle...")
-        (println "Scraping Alby")
-        (autoscrape-alby alby-conn alby-token 3000)
-        (println)
-        (println "Scraping JB LND")
-        (autoscrape-lnd lnd-conn lnd-macaroon 500)
-        (println)
-        (println "Scraping NodeCan LND")
-        (autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
+        ;; Run in parallel and wait for all to complete.
+        (println "Scraping in parallel...")
+        (run! deref [(utils/apply-virtual autoscrape-alby alby-conn alby-token 3000)
+                     (utils/apply-virtual autoscrape-lnd lnd-conn lnd-macaroon 500)
+                     (utils/apply-virtual autoscrape-nodecan nodecan-conn nodecan-macaroon 500)])
+        (println "Scrape phase complete.")
         (println)
         (println "Syncing missing boosts")
         (println "Syncing JB")
@@ -256,55 +254,43 @@
   ;; ALBY
   (reset! alby/scrape-can-run false)
   (reset! alby/scrape-can-run true)
-  (async/take!
-   (async/thread-call (fn []
-                     ;;(scrape-boosts-since conn test-token
-                        (scrape-alby-boosts alby-conn alby/test-token
-                                            3000
-                                            #_#inst "2024-07-25T00:00"
-                                            #_#inst "2023-12-31T11:59Z")))
-   (fn [_] (println "ALL DONE!")))
 
   ;; LND
   (reset! lnd/scrape-can-run false)
   (reset! lnd/scrape-can-run true)
-  (async/take!
-   (async/thread-call (fn []
-                        (scrape-lnd-boosts lnd-conn lnd/macaroon 500)))
-   (fn [x] (println "========== DONE ==========" x)))
 
-  (scrape-nodecan-boosts nodecan-conn lnd/nodecan-macaroon 1000)
+  ;; scrape-until-epoch
+  (utils/apply-virtual
+   (fn []
+     (scrape-alby-boosts-until-epoch
+      alby-conn
+      alby/test-token
+      (->epoch #inst "2024-07-01T00:00")
+      2000)
+     (println "alby sync complete")))
 
-  (async/take! (async/thread-call
-                (fn []
-                  (scrape-alby-boosts-until-epoch
-                   alby-conn
-                   alby/test-token
-                   (->epoch #inst "2024-07-01T00:00")
-                   2000)))
-               (fn [_] (println "alby sync complete")))
+  (utils/apply-virtual
+   (fn []
+     (scrape-lnd-boosts-until-epoch
+      lnd-conn
+      lnd/macaroon
+      (->epoch #inst "2024-07-01T00:00")
+      50)
+     (println "lnd sync complete")))
 
-  (async/take! (async/thread-call
-                (fn []
-                  (scrape-lnd-boosts-until-epoch
-                   lnd-conn
-                   lnd/macaroon
-                   (->epoch #inst "2024-07-01T00:00")
-                   50)))
-               (fn [_] (println "lnd sync complete")))
+  (utils/apply-virtual
+   (fn []
+     (scrape-nodecan-boosts-until-epoch
+      nodecan-conn
+      lnd/nodecan-macaroon
+      (->epoch #inst "2024-07-01T00:00")
+      500)
+     (println "nodecan sync complete")))
 
-  (async/take! (async/thread-call
-                (fn []
-                  (scrape-nodecan-boosts-until-epoch
-                   nodecan-conn
-                   lnd/nodecan-macaroon
-                   (->epoch #inst "2024-07-01T00:00")
-                   500)))
-               (fn [_] (println "nodecan sync complete")))
-
-  (autoscrape-alby alby-conn alby/test-token 2000)
-  (autoscrape-lnd lnd-conn lnd/macaroon 500)
-  (autoscrape-nodecan nodecan-conn lnd/nodecan-macaroon 500)
+  ;; autoscrape
+  (utils/apply-virtual autoscrape-alby alby-conn alby/test-token 2000)
+  (utils/apply-virtual autoscrape-lnd lnd-conn lnd/macaroon 500)
+  (utils/apply-virtual autoscrape-nodecan nodecan-conn lnd/nodecan-macaroon 500)
 
   (->> #_1722901411 (->epoch #inst "2024-07-01T07:00") #_1722388429
        (boost-scraper.reports/get-boost-summary-for-report' lnd-conn #"(?i).*")
