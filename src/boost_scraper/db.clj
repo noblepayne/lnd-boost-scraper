@@ -1,8 +1,8 @@
 (ns boost-scraper.db
   (:require [cheshire.core :as json]
-            [datalevin.core :as d]
             [clojure.instant]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [datalevin.core :as d]))
 
 (def alby-dbi "/home/wes/Downloads/boostdb/alby_boostdb")
 (def lnd-dbi "/home/wes/Downloads/boostdb/lnd_boostdb")

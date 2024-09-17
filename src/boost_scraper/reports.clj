@@ -1,9 +1,9 @@
 (ns boost-scraper.reports
   (:require [boost-scraper.utils :as utils]
-            [datalevin.core :as d]
             [clojure.instant]
             [clojure.string :as str]
-            [clojure.pprint :as pprint]))
+            [clojure.pprint :as pprint]
+            [datalevin.core :as d]))
 
 (defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
   (d/q '[:find (d/pull ?e [:db/id :invoice/creation_date :boostagram/content_id :boostagram/value_sat_total])

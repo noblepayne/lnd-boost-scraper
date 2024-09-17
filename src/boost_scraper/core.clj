@@ -205,7 +205,7 @@
         nodecan-macaroon (lnd/read-macaroon (System/getenv "NODECAN_MACAROON_PATH"))
         alby-token (System/getenv "ALBY_ACCESS_CODE")
         runtime (Runtime/getRuntime)
-        webserver (web/-main lnd-conn)
+        webserver (web/serve lnd-conn)
         shutdown-hook (Thread. (fn []
                                  (println "stopping scraper")
                                  (.close webserver)

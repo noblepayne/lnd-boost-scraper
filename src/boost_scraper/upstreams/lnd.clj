@@ -1,6 +1,6 @@
 (ns boost-scraper.upstreams.lnd
-  (:require [boost-scraper.utils :as utils]
-            [babashka.http-client :as http]
+  (:require [babashka.http-client :as http]
+            [boost-scraper.utils :as utils]
             [cheshire.core :as json]))
 
 (def scrape-can-run (atom true))

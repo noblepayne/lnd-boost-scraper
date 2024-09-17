@@ -14,13 +14,6 @@
             [reitit.ring.middleware.muuntaja :as muuntaja]))
 
 ;; CSS
-(def pico-fluid-classless
-  (str "\n"
-       (str/trim
-        (slurp
-         (io/resource "pico.fluid.classless.min.css")))
-       "\n"))
-
 (def pico-classless
   (str "\n"
        (str/trim
@@ -119,16 +112,10 @@
                          reitit.ring.middleware.parameters/parameters-middleware]}})
    (ring/routes (ring/create-default-handler))))
 
-(defn apply-virtual [f & args]
-  (let [deferred (mf/deferred)]
-    (Thread/startVirtualThread
-     (fn []
-       (try
-         (mf/success! deferred (apply f args))
-         (catch Exception e (mf/error! deferred e)))))
-    deferred))
-
-(defn make-virtual [f]
+(defn make-virtual
+  "Like utils/make-virtual but returns a Manifold deferred instead
+   of a CompletableFuture."
+  [f]
   (fn [& args]
     (let [deferred (mf/deferred)]
       (Thread/startVirtualThread
@@ -138,7 +125,7 @@
            (catch Exception e (mf/error! deferred e)))))
       deferred)))
 
-(defn -main
+(defn serve
   [db-conn]
   (http/start-server
    (make-virtual (http-handler db-conn))
@@ -151,7 +138,8 @@
 
 (comment
 
-  (def app_ (make-virtual (http-handler boost-scraper.core/nodecan-conn)))
-  (def server (http/start-server #'app_ {:port 9999 :executor :none})) ;; `#'` allows reloading by redef-ing app
+  (def http-handler' (make-virtual (http-handler boost-scraper.core/nodecan-conn)))
+  ;; `#'` allows reloading by redef-ing http-handler'
+  (def server (http/start-server #'http-handler' {:port 9999 :executor :none}))
   (.close server)
   (->  "http://localhost:9999/ping" httpc/get :body print))
