@@ -74,7 +74,7 @@
             (<= epoch first_creation_date))))))
 
 (comment
-
+  (require '[boost-scraper.core])
   (def macaroon (read-macaroon "/home/wes/src/lnd_workdir/admin.macaroon"))
   (def nodecan-macaroon (read-macaroon "/home/wes/src/lnd_workdir/nodecan/nodecan.macaroon"))
 

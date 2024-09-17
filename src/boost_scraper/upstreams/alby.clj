@@ -70,7 +70,7 @@
             (<= epoch first_creation_date))))))
 
 (comment
-
+  (require '[boost-scraper.core])
   (def test-token (or (System/getenv "ALBY_ACCESS_CODE") ""))
 
   (get-boosts {:token test-token :items 2

@@ -6,6 +6,7 @@
             [datalevin.core :as d]))
 
 (defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
+  #_:clj-kondo/ignore ;; FIXME: kondo doesn't like (get-else ...)?
   (d/q '[:find (d/pull ?e [:db/id :invoice/creation_date :boostagram/content_id :boostagram/value_sat_total])
          :in $ ?regex' ?last-seen-timestamp'
          :where

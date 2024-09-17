@@ -7,8 +7,7 @@
       (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy/MM/dd h:mm:ss a zzz"))))
 
 (defn apply-virtual
-  "Apply f to args on a virtual thread. Returns a CompletableFuture eventually
-   containing (apply f args)."
+  "Returns a CompletableFuture eventually containing (apply f args)."
   [f & args]
   (let [fut (CompletableFuture.)]
     (Thread/startVirtualThread

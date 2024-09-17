@@ -99,8 +99,7 @@
 ;; Top Level HTTP
 (defn routes [db-conn]
   [["/ping"
-    {:get {:handler (fn [_] (Thread/sleep 10000)
-                      {:status 200 :body "pong\n"})}}]
+    {:get {:handler (fn [_] {:status 200 :body "pong\n"})}}]
    ["/boosts" {:get {:handler (get-boosts db-conn)}}]])
 
 (defn http-handler [db-conn]
@@ -137,7 +136,7 @@
     :executor :none}))
 
 (comment
-
+  (require '[boost-scraper.core])
   (def http-handler' (make-virtual (http-handler boost-scraper.core/nodecan-conn)))
   ;; `#'` allows reloading by redef-ing http-handler'
   (def server (http/start-server #'http-handler' {:port 9999 :executor :none}))

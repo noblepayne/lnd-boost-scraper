@@ -191,7 +191,7 @@
 
 (def scrape-sleep-interval 60000)
 
-(defn -main [& args]
+(defn -main [& _]
   ;; TODO: proper startup validation
   (let [env (System/getenv)
         {:keys [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE]} (zipmap (map keyword (keys env)) (vals env))]
