@@ -5,7 +5,7 @@
             [clojure.java.io :as io]
             [clojure.math :as math]
             [clojure.string :as str]
-            [cybermonday.core :as cm]
+            [cybermonday.core :as markdown]
             [dev.onionpancakes.chassis.core :as html]
             [manifold.deferred :as mf]
             [muuntaja.core :as m]
@@ -94,7 +94,7 @@
                                          :margin-bottom "10px"
                                          :margin-left "50px"
                                          :margin-right "50px"}}
-                    (cm/parse-body report)]]))]]]]]])})))
+                    (markdown/parse-body report)]]))]]]]]])})))
 
 ;; Top Level HTTP
 (defn routes [db-conn]
