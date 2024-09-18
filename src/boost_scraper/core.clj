@@ -4,14 +4,16 @@
   (:gen-class)
   (:require [boost-scraper.db :as db]
             [boost-scraper.reports :as reports]
-            [boost-scraper.upstreams.alby :as alby]
-            [boost-scraper.upstreams.lnd :as lnd]
+            [boost-scraper.upstream :as upstream]
+            [boost-scraper.upstream.alby :as alby]
+            [boost-scraper.upstream.lnd :as lnd]
             [boost-scraper.utils :as utils]
             [boost-scraper.web :as web]
             [clojure.string :as str]
             [clojure.set :as set]
             [clojure.instant]
-            [datalevin.core :as d]))
+            [datalevin.core :as d])
+  (:import [boost_scraper.upstream IBoostScrape]))
 
 (defn ->epoch [inst]
   (-> inst .toInstant .getEpochSecond))
@@ -112,39 +114,48 @@
         two-days-ago (- now (* 60 60 24 2))]
     two-days-ago))
 
-#_(defn scrape-boosts-since [conn token items-per-page wait since]
-    (->> (alby/get-all-boosts token items-per-page :wait wait :since since)
-         (db/add-boosts conn)))
+(defn get-all-boosts [^IBoostScrape scraper token & get-boost-args]
+  (iteration #(upstream/get-boosts scraper %)
+             {:somef (comp seq :data)
+              :kf :next
+              :vf :data
+              :initk (into {:token token}
+                           (apply hash-map get-boost-args))}))
 
-#_(defn scrape-boosts-after [conn token items-per-page wait after]
-    (->> (alby/get-all-boosts token items-per-page :wait wait :after after)
-         (db/add-boosts conn)))
-
-(defn scrape-alby-boosts [conn token wait]
-  (->> (alby/get-all-boosts token :wait wait)
-       (db/add-boosts conn "alby")))
-
-(defn scrape-alby-boosts-until-epoch [conn token epoch wait]
-  (->> (alby/get-all-boosts-until-epoch token epoch :wait wait)
-       (db/add-boosts conn "alby")))
+(defn get-all-boosts-until-epoch [^IBoostScrape scraper token epoch & get-boost-args]
+  (->> {:somef (comp seq :data)
+        :vf :data
+        :kf :next
+        :initk (into {:token token}
+                     (apply hash-map get-boost-args))}
+       (iteration #(upstream/get-boosts scraper %))
+       (take-while
+        (fn [boost-batch]
+          (let [filtered-batch (filter :creation_date boost-batch)
+                creation_dates (map (comp #(if (int? %) % (Integer/parseInt %))
+                                          :creation_date)
+                                    filtered-batch)
+                first_creation_date (apply max creation_dates)]
+            ;; TODO: tests; <= or <?
+            (<= epoch first_creation_date))))))
 
 #_(def AUTOSCRAPE_START (->epoch #inst "2023-12-31T23:59Z"))
 (def AUTOSCRAPE_START (->epoch #inst "2024-09-01T23:59Z"))
+
+(defn scrape-alby-boosts-until-epoch [conn token epoch wait]
+  (->> (get-all-boosts-until-epoch (alby/->Scraper) token epoch :wait wait)
+       (db/add-boosts conn "alby")))
 
 (defn autoscrape-alby [conn token wait]
   (let [[most-recent-timestamp]
         (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
                  (d/db conn))
             [AUTOSCRAPE_START])]
-    (->> (alby/get-all-boosts-until-epoch token most-recent-timestamp :wait wait)
+    (->> (get-all-boosts-until-epoch (alby/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "alby"))))
 
-(defn scrape-lnd-boosts [conn macaroon wait]
-  (->> (lnd/get-all-boosts macaroon :wait wait)
-       (db/add-boosts conn "JB")))
-
 (defn scrape-lnd-boosts-until-epoch [conn macaroon epoch wait]
-  (->> (lnd/get-all-boosts-until-epoch macaroon epoch :wait wait)
+  (->> (get-all-boosts-until-epoch (lnd/->Scraper) macaroon epoch :wait wait)
        (db/add-boosts conn "JB")))
 
 (defn autoscrape-lnd [conn token wait]
@@ -152,20 +163,15 @@
         (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
                  (d/db conn))
             [AUTOSCRAPE_START])]
-    (->> (lnd/get-all-boosts-until-epoch token most-recent-timestamp :wait wait)
+    (->> (get-all-boosts-until-epoch (lnd/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "JB"))))
 
-(defn scrape-nodecan-boosts [conn macaroon wait]
-  (->> (lnd/get-all-boosts macaroon
-                           :wait wait
-                           :url "https://100.120.212.39:8080/v1/invoices")
-       (db/add-boosts conn "nodecan")))
-
 (defn scrape-nodecan-boosts-until-epoch [conn macaroon epoch wait]
-  (->> (lnd/get-all-boosts-until-epoch macaroon
-                                       epoch
-                                       :wait wait
-                                       :url "https://100.120.212.39:8080/v1/invoices")
+  (->> (get-all-boosts-until-epoch (lnd/->Scraper)
+                                   macaroon
+                                   epoch
+                                   :wait wait
+                                   :url "https://100.120.212.39:8080/v1/invoices")
 
        (db/add-boosts conn "nodecan")))
 
@@ -174,10 +180,11 @@
         (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
                  (d/db conn))
             [AUTOSCRAPE_START])]
-    (->> (lnd/get-all-boosts-until-epoch token
-                                         most-recent-timestamp
-                                         :wait wait
-                                         :url "https://100.120.212.39:8080/v1/invoices")
+    (->> (get-all-boosts-until-epoch (lnd/->Scraper)
+                                     token
+                                     most-recent-timestamp
+                                     :wait wait
+                                     :url "https://100.120.212.39:8080/v1/invoices")
          (db/add-boosts conn "nodecan"))))
 
 (defn q
@@ -194,47 +201,46 @@
 (defn -main [& _]
   ;; TODO: proper startup validation
   (let [env (System/getenv)
-        {:keys [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE]} (zipmap (map keyword (keys env)) (vals env))]
-    (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_ACCESS_CODE))
-      (println "Missing required credentials!" {:jbnode JBNODE_MACAROON_PATH :nodecan NODECAN_MACAROON_PATH :alby ALBY_ACCESS_CODE})
-      (System/exit 1)))
-  (let [lnd-conn (d/get-conn db/lnd-dbi db/schema)
-        alby-conn (d/get-conn db/alby-dbi db/schema)
-        nodecan-conn (d/get-conn db/nodecan-dbi db/schema)
-        lnd-macaroon (lnd/read-macaroon (System/getenv "JBNODE_MACAROON_PATH"))
-        nodecan-macaroon (lnd/read-macaroon (System/getenv "NODECAN_MACAROON_PATH"))
-        alby-token (System/getenv "ALBY_ACCESS_CODE")
-        runtime (Runtime/getRuntime)
-        webserver (web/serve lnd-conn)
-        shutdown-hook (Thread. (fn []
-                                 (println "stopping scraper")
-                                 (.close webserver)
-                                 (reset! lnd/scrape-can-run false)
-                                 (reset! alby/scrape-can-run false)
-                                 (d/close lnd-conn)
-                                 (d/close nodecan-conn)
-                                 (d/close alby-conn)))
-        _ (.addShutdownHook runtime shutdown-hook)]
-    (while true
-      (try
-        (println "Starting Scrape Cycle...")
+        {:strs [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH]} env]
+    (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH))
+      (println "Missing required credentials!" {:jbnode JBNODE_MACAROON_PATH :nodecan NODECAN_MACAROON_PATH :alby ALBY_TOKEN_PATH})
+      (System/exit 1))
+    (let [lnd-conn (d/get-conn db/lnd-dbi db/schema)
+          alby-conn (d/get-conn db/alby-dbi db/schema)
+          nodecan-conn (d/get-conn db/nodecan-dbi db/schema)
+          lnd-macaroon (lnd/read-macaroon JBNODE_MACAROON_PATH)
+          nodecan-macaroon (lnd/read-macaroon  NODECAN_MACAROON_PATH)
+          alby-token (alby/load-key ALBY_TOKEN_PATH)
+          runtime (Runtime/getRuntime)
+          webserver (web/serve lnd-conn)
+          shutdown-hook (Thread. (fn []
+                                   (println "stopping scraper")
+                                   (.close webserver)
+                                   (reset! upstream/scrape false)
+                                   (d/close lnd-conn)
+                                   (d/close nodecan-conn)
+                                   (d/close alby-conn)))
+          _ (.addShutdownHook runtime shutdown-hook)]
+      (while true
+        (try
+          (println "Starting Scrape Cycle...")
         ;; Run in parallel and wait for all to complete.
-        (println "Scraping in parallel...")
-        (run! deref [(utils/apply-virtual autoscrape-alby alby-conn alby-token 3000)
-                     (utils/apply-virtual autoscrape-lnd lnd-conn lnd-macaroon 500)
-                     (utils/apply-virtual autoscrape-nodecan nodecan-conn nodecan-macaroon 500)])
-        (println "Scrape phase complete.")
-        (println)
-        (println "Syncing missing boosts")
-        (println "Syncing JB")
-        (sync-mising-boosts! nodecan-conn lnd-conn (two-days-ago))
-        (println "Syncing alby")
-        (sync-mising-boosts! nodecan-conn alby-conn (two-days-ago))
-        (println "Finished syncing missing boosts")
-        (println)
-        (println "Scrape Cycle finished, sleeping.")
-        (Thread/sleep scrape-sleep-interval)
-        (catch Exception e (println "ERROR WHILE SCRAPING! " (bean e)))))))
+          (println "Scraping in parallel...")
+          (run! deref [(utils/apply-virtual autoscrape-alby alby-conn alby-token 3000)
+                       (utils/apply-virtual autoscrape-lnd lnd-conn lnd-macaroon 500)
+                       (utils/apply-virtual autoscrape-nodecan nodecan-conn nodecan-macaroon 500)])
+          (println "Scrape phase complete.")
+          (println)
+          (println "Syncing missing boosts")
+          (println "Syncing JB")
+          (sync-mising-boosts! nodecan-conn lnd-conn (two-days-ago))
+          (println "Syncing alby")
+          (sync-mising-boosts! nodecan-conn alby-conn (two-days-ago))
+          (println "Finished syncing missing boosts")
+          (println)
+          (println "Scrape Cycle finished, sleeping.")
+          (Thread/sleep scrape-sleep-interval)
+          (catch Exception e (println "ERROR WHILE SCRAPING! " (bean e))))))))
 
 (comment
   (require '[portal.api :as p])
