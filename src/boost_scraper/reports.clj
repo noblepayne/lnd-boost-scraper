@@ -122,7 +122,8 @@
                                    :invoice/created_at
                                    :invoice/creation_date
                                    :invoice/identifier
-                                   :boostagram/message]) ...]
+                                   :boostagram/message
+                                   :scraper/source]) ...]
                :in $ [?e' ...]]
               $ ?boost_ids)
              ?boosts]]
@@ -235,10 +236,12 @@
                   boostagram/episode
                   boostagram/app_name
                   #_invoice/identifier
-                  invoice/creation_date]} boost]
+                  invoice/creation_date
+                  scraper/source]} boost]
       [(str "+ " podcast "\n"
             "+ " episode "\n"
             "+ " app_name "\n"
+            "+ " source "\n"
             #_("+ " identifier "\n")
             "\n"
             "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
