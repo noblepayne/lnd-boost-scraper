@@ -82,6 +82,7 @@ in {
         ALBY_TOKEN_PATH = cfg.albyTokenPath;
         JBNODE_MACAROON_PATH = cfg.jbnodeMacaroonPath;
         NODECAN_MACAROON_PATH = cfg.nodecanMacaroonPath;
+        SCRAPER_UIPORT = builtins.toString cfg.uiPort;
       };
     };
   };

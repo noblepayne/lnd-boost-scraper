@@ -133,7 +133,7 @@
   [db-conn]
   (http/start-server
    (make-virtual (http-handler db-conn))
-   {:port 9999
+   {:port (Integer/parseInt (or (System/getenv "SCRAPER_UIPORT") 3223)) 
     ;; When other than :none our handler is run on a thread pool.
     ;; As we are wrapping our handler in a new virtual thread per request
     ;; on our own, we have no risk of blocking the (aleph) handler thread and
