@@ -85,7 +85,12 @@
                 ;; Query results
                 (let [show (re-pattern show)
                       since (Integer/parseInt since)
-                      report (reports/boost-report db-conn show since)]
+                      report (reports/boost-report db-conn show since)
+                      ;; hacky prototype helipad replacement
+                      #_(str/join "\n" (map #(reports/format-boost-batch-details [%])
+                                          (sort-by :invoice/creation_date
+                                                   #(compare %2 %1)
+                                                   (into [] cat (reports/get-boost-summary-for-report' db-conn show since)))))]
                   [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
                    [:div {:style {"padding" "10px"}}
                     [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]]

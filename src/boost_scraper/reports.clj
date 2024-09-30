@@ -7,7 +7,17 @@
 
 (defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
   #_:clj-kondo/ignore ;; FIXME: kondo doesn't like (get-else ...)?
-  (d/q '[:find (d/pull ?e [:db/id :invoice/creation_date :boostagram/content_id :boostagram/value_sat_total])
+  (d/q '[:find (d/pull ?e [:db/id
+                           :invoice/identifier
+                           :invoice/created_at
+                           :invoice/creation_date
+                           :boostagram/content_id
+                           :boostagram/value_sat_total
+                           :boostagram/sender_name_normalized
+                           :boostagram/podcast
+                           :boostagram/episode
+                           :boostagram/app_name
+                           :boostagram/message])
          :in $ ?regex' ?last-seen-timestamp'
          :where
          [?e :invoice/creation_date ?creation_date]
