@@ -4,10 +4,6 @@
             [clojure.string :as str]
             [datalevin.core :as d]))
 
-(def alby-dbi "/home/wes/Downloads/boostdb/alby_boostdb")
-(def lnd-dbi "/home/wes/Downloads/boostdb/lnd_boostdb")
-(def nodecan-dbi "/home/wes/Downloads/boostdb/nodecan_boostdb")
-
 (def schema
   {:invoice/identifier {:db/valueType :db.type/string
                         :db/unique :db.unique/identity}

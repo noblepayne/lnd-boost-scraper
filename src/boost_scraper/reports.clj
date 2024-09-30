@@ -295,3 +295,23 @@
        sort-report
        format-sorted-report))
 
+
+(defn first-booster [conn episode]
+  (d/q '[:find [(d/pull ?entity [:boostagram/sender_name  ;; what fields we want to see on the entity
+                                 :invoice/created_at
+                                 :boostagram/app_name
+                                 :boostagram/value_sat_total])]
+         :in $ ?episode
+       ;; find entity id for first stream that matches our filters
+         :where [(d/q [:find [(min ?timestamp) ?entity]
+                       :where
+                     ;; find only streams
+                       [?entity :boostagram/action "stream"]
+                     ;; for a particular episode
+                       [?entity :boostagram/episode ?episode]
+                     ;; bind creation_date to ?timestamp
+                       [?entity :invoice/creation_date ?timestamp]]
+                      $)
+                 [_ ?entity]]]
+       (d/db conn)
+       episode))

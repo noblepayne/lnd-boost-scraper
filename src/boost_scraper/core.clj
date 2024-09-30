@@ -25,11 +25,13 @@
                              boostagram/app_name
                              invoice/created_at
                              invoice/creation_date
-                             boostagram/message]}]
+                             boostagram/message
+                             scraper/source]}]
   (str "### From: " sender_name_normalized
        "\n + " (reports/int-comma value_sat_total) " sats"
        "\n + " podcast " / " episode
        "\n + " app_name " " created_at " (" creation_date ")"
+       "\n + " source
        "\n" (str/join "\n" (map #(str "   > " %)
                                 (str/split-lines (or message ""))))
        "\n"))
@@ -140,7 +142,7 @@
             (<= epoch first_creation_date))))))
 
 #_(def AUTOSCRAPE_START (->epoch #inst "2023-12-31T23:59Z"))
-(def AUTOSCRAPE_START (->epoch #inst "2024-09-01T23:59Z"))
+(def AUTOSCRAPE_START (->epoch #inst "2024-08-31T23:59Z"))
 
 (defn scrape-alby-boosts-until-epoch [conn token epoch wait]
   (->> (get-all-boosts-until-epoch (alby/->Scraper) token epoch :wait wait)
@@ -201,13 +203,13 @@
 (defn -main [& _]
   ;; TODO: proper startup validation
   (let [env (System/getenv)
-        {:strs [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH]} env]
-    (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH))
+        {:strs [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH ALBY_DBI JBNODE_DBI NODECAN_DBI]} env]
+    (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH ALBY_DBI JBNODE_DBI NODECAN_DBI))
       (println "Missing required credentials!" {:jbnode JBNODE_MACAROON_PATH :nodecan NODECAN_MACAROON_PATH :alby ALBY_TOKEN_PATH})
       (System/exit 1))
-    (let [lnd-conn (d/get-conn db/lnd-dbi db/schema)
-          alby-conn (d/get-conn db/alby-dbi db/schema)
-          nodecan-conn (d/get-conn db/nodecan-dbi db/schema)
+    (let [lnd-conn (d/get-conn JBNODE_DBI db/schema)
+          alby-conn (d/get-conn ALBY_DBI db/schema)
+          nodecan-conn (d/get-conn NODECAN_DBI db/schema)
           lnd-macaroon (lnd/read-macaroon JBNODE_MACAROON_PATH)
           nodecan-macaroon (lnd/read-macaroon  NODECAN_MACAROON_PATH)
           alby-token (alby/load-key ALBY_TOKEN_PATH)
@@ -224,7 +226,7 @@
       (while true
         (try
           (println "Starting Scrape Cycle...")
-        ;; Run in parallel and wait for all to complete.
+          ;; Run in parallel and wait for all to complete.
           (println "Scraping in parallel...")
           (run! deref [(utils/apply-virtual autoscrape-alby alby-conn alby-token 3000)
                        (utils/apply-virtual autoscrape-lnd lnd-conn lnd-macaroon 500)
@@ -233,23 +235,24 @@
           (println)
           (println "Syncing missing boosts")
           (println "Syncing JB")
-          (sync-mising-boosts! nodecan-conn lnd-conn (two-days-ago))
+          (sync-mising-boosts! nodecan-conn lnd-conn AUTOSCRAPE_START #_(two-days-ago))
           (println "Syncing alby")
-          (sync-mising-boosts! nodecan-conn alby-conn (two-days-ago))
+          (sync-mising-boosts! nodecan-conn alby-conn AUTOSCRAPE_START #_(two-days-ago))
           (println "Finished syncing missing boosts")
           (println)
           (println "Scrape Cycle finished, sleeping.")
           (Thread/sleep scrape-sleep-interval)
           (catch Exception e (println "ERROR WHILE SCRAPING! " (bean e))))))))
 
+
 (comment
   (require '[portal.api :as p])
   (p/open)
   (add-tap #'p/submit)
 
-  (def alby-conn (d/get-conn db/alby-dbi db/schema))
-  (def lnd-conn (d/get-conn db/lnd-dbi db/schema))
-  (def nodecan-conn (d/get-conn db/nodecan-dbi db/schema))
+  (def alby-conn (d/get-conn (System/getenv "ALBY_DBI") db/schema))
+  (def lnd-conn (d/get-conn (System/getenv "JBNODE_DBI") db/schema))
+  (def nodecan-conn (d/get-conn (System/getenv "NODECAN_DBI") db/schema))
 
   (count (d/datoms (d/db alby-conn) :eav))
   (d/datoms (d/db alby-conn) :eav 1)
@@ -294,7 +297,7 @@
      (println "nodecan sync complete")))
 
   ;; autoscrape
-  (utils/apply-virtual autoscrape-alby alby-conn alby/test-token 2000)
+  (utils/apply-virtual autoscrape-alby alby-conn alby/alby-token 2000)
   (utils/apply-virtual autoscrape-lnd lnd-conn lnd/macaroon 500)
   (utils/apply-virtual autoscrape-nodecan nodecan-conn lnd/nodecan-macaroon 500)
 
