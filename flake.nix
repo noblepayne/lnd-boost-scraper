@@ -114,5 +114,16 @@
         };
       })
       nixpkgs.legacyPackages;
+    nixosModules = {
+      default = {
+        options,
+        config,
+        pkgs,
+        ...
+      }: {
+        imports = [./module.nix];
+        config.services.lnd-boost-scraper.pkg = self.packages.${pkgs.system}.default;
+      };
+    };
   };
 }
