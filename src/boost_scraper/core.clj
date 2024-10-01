@@ -153,6 +153,7 @@
         (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
                  (d/db conn))
             [AUTOSCRAPE_START])]
+    (println "alby most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (alby/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "alby"))))
 
@@ -165,6 +166,7 @@
         (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
                  (d/db conn))
             [AUTOSCRAPE_START])]
+    (println "jbnode most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "JB"))))
 
@@ -182,6 +184,7 @@
         (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
                  (d/db conn))
             [AUTOSCRAPE_START])]
+    (println "nodecan most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper)
                                      token
                                      most-recent-timestamp
@@ -214,7 +217,7 @@
           nodecan-macaroon (lnd/read-macaroon  NODECAN_MACAROON_PATH)
           alby-token (alby/load-key ALBY_TOKEN_PATH)
           runtime (Runtime/getRuntime)
-          webserver (web/serve lnd-conn)
+          webserver (web/serve nodecan-conn)
           shutdown-hook (Thread. (fn []
                                    (println "stopping scraper")
                                    (.close webserver)
