@@ -150,9 +150,10 @@
 
 (defn autoscrape-alby [conn token wait]
   (let [[most-recent-timestamp]
-        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-                 (d/db conn))
-            [AUTOSCRAPE_START])]
+        (if-not (empty? (d/entity (d/db conn) 1))
+          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+               (d/db conn))
+          [AUTOSCRAPE_START])]
     (println "alby most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (alby/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "alby"))))
@@ -163,9 +164,10 @@
 
 (defn autoscrape-lnd [conn token wait]
   (let [[most-recent-timestamp]
-        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-                 (d/db conn))
-            [AUTOSCRAPE_START])]
+        (if-not (empty? (d/entity (d/db conn) 1))
+          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+               (d/db conn))
+          [AUTOSCRAPE_START])]
     (println "jbnode most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "JB"))))
@@ -181,9 +183,10 @@
 
 (defn autoscrape-nodecan [conn token wait]
   (let [[most-recent-timestamp]
-        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-                 (d/db conn))
-            [AUTOSCRAPE_START])]
+        (if-not (empty? (d/entity (d/db conn) 1))
+          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+               (d/db conn))
+          [AUTOSCRAPE_START])]
     (println "nodecan most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper)
                                      token
@@ -238,15 +241,14 @@
           (println)
           (println "Syncing missing boosts")
           (println "Syncing JB")
-          (sync-mising-boosts! nodecan-conn lnd-conn AUTOSCRAPE_START #_(two-days-ago))
+          (sync-mising-boosts! nodecan-conn lnd-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
           (println "Syncing alby")
-          (sync-mising-boosts! nodecan-conn alby-conn AUTOSCRAPE_START #_(two-days-ago))
+          (sync-mising-boosts! nodecan-conn alby-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
           (println "Finished syncing missing boosts")
           (println)
           (println "Scrape Cycle finished, sleeping.")
           (Thread/sleep scrape-sleep-interval)
           (catch Exception e (println "ERROR WHILE SCRAPING! " (bean e))))))))
-
 
 (comment
   (require '[portal.api :as p])
@@ -276,8 +278,8 @@
    (fn []
      (scrape-alby-boosts-until-epoch
       alby-conn
-      alby/test-token
-      (->epoch #inst "2024-07-01T00:00")
+      alby/alby-token
+      (->epoch #inst "2024-09-14T00:00")
       2000)
      (println "alby sync complete")))
 
@@ -286,7 +288,7 @@
      (scrape-lnd-boosts-until-epoch
       lnd-conn
       lnd/macaroon
-      (->epoch #inst "2024-07-01T00:00")
+      (->epoch #inst "2024-09-14T00:00")
       50)
      (println "lnd sync complete")))
 
@@ -295,7 +297,7 @@
      (scrape-nodecan-boosts-until-epoch
       nodecan-conn
       lnd/nodecan-macaroon
-      (->epoch #inst "2024-07-01T00:00")
+      (->epoch #inst "2024-09-18T00:00")
       500)
      (println "nodecan sync complete")))
 

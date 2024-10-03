@@ -298,7 +298,6 @@
        sort-report
        format-sorted-report))
 
-
 (defn first-booster [conn episode]
   (d/q '[:find [(d/pull ?entity [:boostagram/sender_name  ;; what fields we want to see on the entity
                                  :invoice/created_at

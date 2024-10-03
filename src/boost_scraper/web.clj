@@ -88,9 +88,9 @@
                       report (reports/boost-report db-conn show since)
                       ;; hacky prototype helipad replacement
                       #_(str/join "\n" (map #(reports/format-boost-batch-details [%])
-                                          (sort-by :invoice/creation_date
-                                                   #(compare %2 %1)
-                                                   (into [] cat (reports/get-boost-summary-for-report' db-conn show since)))))]
+                                            (sort-by :invoice/creation_date
+                                                     #(compare %2 %1)
+                                                     (into [] cat (reports/get-boost-summary-for-report' db-conn show since)))))]
                   [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
                    [:div {:style {"padding" "10px"}}
                     [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]]
@@ -133,7 +133,7 @@
   [db-conn]
   (http/start-server
    (make-virtual (http-handler db-conn))
-   {:port (Integer/parseInt (or (System/getenv "SCRAPER_UIPORT") 3223)) 
+   {:port (Integer/parseInt (or (System/getenv "SCRAPER_UIPORT") 3223))
     ;; When other than :none our handler is run on a thread pool.
     ;; As we are wrapping our handler in a new virtual thread per request
     ;; on our own, we have no risk of blocking the (aleph) handler thread and
