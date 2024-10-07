@@ -21,6 +21,12 @@
          (io/resource "pico.classless.min.css")))
        "\n"))
 
+(def js
+  (str "\n"
+       (str/trim
+        (slurp (io/resource "boost_report.js")))
+       "\n"))
+
 ;; Routes
 (def show->regex
   {"All Shows" ".*"
@@ -55,18 +61,7 @@
            [:style (html/raw (str "div#report blockquote {padding-bottom: 0px;
                                                           padding-top: 0px;}"))]
            [:script {:type "text/javascript"}
-            (html/raw
-             (str
-              "function copyMarkdown () {
-                 navigator.clipboard.writeText(document.getElementById('markdown').textContent);
-                 const button = document.getElementById('copyMarkdown')
-                 setTimeout(() => {
-                   button.textContent = 'Copied!';
-                   setTimeout(() => {
-                     button.textContent = 'Copy Markdown';
-                   }, 1500);
-                 }, 200);
-               }"))]
+            (html/raw js)]
            [:body
             [:main
              [:div
@@ -93,8 +88,9 @@
                                                      (into [] cat (reports/get-boost-summary-for-report' db-conn show since)))))]
                   [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
                    [:div {:style {"padding" "10px"}}
-                    [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]]
-                   [:div#markdown {:style {:display "none"}} report]
+                    [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]
+                    [:button#downloadMarkdown {:onClick "downloadMarkdown()" :style {:display "inline" :margin-left "10px"}} "Download Markdown"]]
+                   [:textarea#markdown {:style {:display "none" :position "absolute" :left "-1000px" :top "-1000px"}} report]
                    [:div#report {:style {:margin-top "10px"
                                          :margin-bottom "10px"
                                          :margin-left "50px"

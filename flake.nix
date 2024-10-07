@@ -40,6 +40,7 @@
                   pkgs.jet
                   pkgs.neovim
                   pkgs.cljfmt
+                  pkgs.nodePackages.prettier
                   #pkgs.vscode
                   (pkgs.vscode-with-extensions.override {
                     vscodeExtensions = [
@@ -58,6 +59,7 @@
                 scripts.format.exec = ''
                   nix fmt
                   cljfmt fix .
+                  prettier -w **/*.js
                 '';
                 scripts.lock.exec = ''
                   nix flake lock
