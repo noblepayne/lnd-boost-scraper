@@ -23,4 +23,7 @@
                         "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
                         ;; lnd uses cert with "localhost"
                         "-Djdk.internal.httpclient.disableHostnameVerification"]}
-  :neil {:project {:name com.noblepayne/lnd-boost-scraper}}}}
+  :neil {:project {:name com.noblepayne/lnd-boost-scraper}}
+  :outdated {;; Note that it is `:deps`, not `:extra-deps`
+             :deps {com.github.liquidz/antq {:mvn/version "RELEASE"}}
+             :main-opts ["-m" "antq.core"]}}}

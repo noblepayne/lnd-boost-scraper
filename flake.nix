@@ -69,6 +69,9 @@
                   nix flake update
                   nix run .#deps-lock
                 '';
+                scripts.upgrade.exec = ''
+                  clojure -M:outdated :upgrade true
+                '';
                 scripts.build.exec = ''
                   nix build .
                 '';
