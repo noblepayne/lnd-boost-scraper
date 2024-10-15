@@ -317,3 +317,29 @@
                  [_ ?entity]]]
        (d/db conn)
        episode))
+
+(defn podcast-app-percentages [conn]
+  (d/q '[:find ?app ?prcnt
+         :in $
+         :order-by [?prcnt :desc]
+         :where
+         [(datalevin.core/q [:find ?app (count ?e)
+                             :in $
+                             :where
+                             [?e :boostagram/action "boost"]
+                             [(get-else $ ?e :boostagram/app_name "unknown_app") ?app]]
+                            $)
+          ?appcnts]
+         [(datalevin.core/q [:find [(sum ?cnt)]
+                             :in [[_ ?cnt]]]
+                            ?appcnts)
+          [?total]]
+         [(datalevin.core/q [:find ?app ?prcnt
+                             :in ?total [[?app ?cnt] ...]
+                             :where
+                             [(/ ?cnt ?total) ?prcnt']
+                             [(* 100.0 ?prcnt') ?prcnt'']
+                             [(clojure.math/round ?prcnt'') ?prcnt]]
+                            ?total ?appcnts)
+          [[?app ?prcnt] ...]]]
+       (d/db conn)))

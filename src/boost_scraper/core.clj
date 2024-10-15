@@ -142,7 +142,7 @@
             (<= epoch first_creation_date))))))
 
 #_(def AUTOSCRAPE_START (->epoch #inst "2023-12-31T23:59Z"))
-(def AUTOSCRAPE_START (->epoch #inst "2024-08-31T23:59Z"))
+(def AUTOSCRAPE_START (->epoch #inst "2024-10-01T00:00Z"))
 
 (defn scrape-alby-boosts-until-epoch [conn token epoch wait]
   (->> (get-all-boosts-until-epoch (alby/->Scraper) token epoch :wait wait)
@@ -150,10 +150,9 @@
 
 (defn autoscrape-alby [conn token wait]
   (let [[most-recent-timestamp]
-        (if-not (empty? (d/entity (d/db conn) 1))
-          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-               (d/db conn))
-          [AUTOSCRAPE_START])]
+        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+                 (d/db conn))
+            [AUTOSCRAPE_START])]
     (println "alby most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (alby/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "alby"))))
@@ -164,10 +163,9 @@
 
 (defn autoscrape-lnd [conn token wait]
   (let [[most-recent-timestamp]
-        (if-not (empty? (d/entity (d/db conn) 1))
-          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-               (d/db conn))
-          [AUTOSCRAPE_START])]
+        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+                 (d/db conn))
+            [AUTOSCRAPE_START])]
     (println "jbnode most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "JB"))))
@@ -183,10 +181,9 @@
 
 (defn autoscrape-nodecan [conn token wait]
   (let [[most-recent-timestamp]
-        (if-not (empty? (d/entity (d/db conn) 1))
-          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-               (d/db conn))
-          [AUTOSCRAPE_START])]
+        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+                 (d/db conn))
+            [AUTOSCRAPE_START])]
     (println "nodecan most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper)
                                      token
@@ -279,7 +276,7 @@
      (scrape-alby-boosts-until-epoch
       alby-conn
       alby/alby-token
-      (->epoch #inst "2024-09-14T00:00")
+      (->epoch #inst "2024-09-01T00:00")
       2000)
      (println "alby sync complete")))
 
@@ -288,7 +285,7 @@
      (scrape-lnd-boosts-until-epoch
       lnd-conn
       lnd/macaroon
-      (->epoch #inst "2024-09-14T00:00")
+      (->epoch #inst "2024-09-01T00:00")
       50)
      (println "lnd sync complete")))
 
@@ -297,7 +294,7 @@
      (scrape-nodecan-boosts-until-epoch
       nodecan-conn
       lnd/nodecan-macaroon
-      (->epoch #inst "2024-09-18T00:00")
+      (->epoch #inst "2024-09-01T00:00")
       500)
      (println "nodecan sync complete")))
 
