@@ -150,9 +150,10 @@
 
 (defn autoscrape-alby [conn token wait]
   (let [[most-recent-timestamp]
-        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-                 (d/db conn))
-            [AUTOSCRAPE_START])]
+        (if-not (empty? (d/entity (d/db conn) 1))
+          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+               (d/db conn))
+          [AUTOSCRAPE_START])]
     (println "alby most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (alby/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "alby"))))
@@ -163,9 +164,10 @@
 
 (defn autoscrape-lnd [conn token wait]
   (let [[most-recent-timestamp]
-        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-                 (d/db conn))
-            [AUTOSCRAPE_START])]
+        (if-not (empty? (d/entity (d/db conn) 1))
+          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+               (d/db conn))
+          [AUTOSCRAPE_START])]
     (println "jbnode most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper) token most-recent-timestamp :wait wait)
          (db/add-boosts conn "JB"))))
@@ -181,9 +183,10 @@
 
 (defn autoscrape-nodecan [conn token wait]
   (let [[most-recent-timestamp]
-        (or (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
-                 (d/db conn))
-            [AUTOSCRAPE_START])]
+        (if-not (empty? (d/entity (d/db conn) 1))
+          (d/q '[:find [(max ?cd)] :where [?e :invoice/creation_date ?cd]]
+               (d/db conn))
+          [AUTOSCRAPE_START])]
     (println "nodecan most-recent-timestamp: " most-recent-timestamp)
     (->> (get-all-boosts-until-epoch (lnd/->Scraper)
                                      token
