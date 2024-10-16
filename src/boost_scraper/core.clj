@@ -142,7 +142,7 @@
             (<= epoch first_creation_date))))))
 
 #_(def AUTOSCRAPE_START (->epoch #inst "2023-12-31T23:59Z"))
-(def AUTOSCRAPE_START (->epoch #inst "2024-10-01T00:00Z"))
+(def AUTOSCRAPE_START (->epoch #inst "2024-09-01T00:00Z"))
 
 (defn scrape-alby-boosts-until-epoch [conn token epoch wait]
   (->> (get-all-boosts-until-epoch (alby/->Scraper) token epoch :wait wait)
