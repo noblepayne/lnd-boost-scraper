@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
  :deps  {org.clojure/clojure {:mvn/version "1.12.0"}
          ;; database
-         datalevin/datalevin {:mvn/version "0.9.12"}
+         datalevin/datalevin {:mvn/version "0.9.13"}
          ;; HTTP
          cheshire/cheshire {:mvn/version "5.13.0"}
          org.babashka/http-client {:mvn/version "0.4.21"}

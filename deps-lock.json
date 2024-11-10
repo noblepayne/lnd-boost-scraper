@@ -368,14 +368,14 @@
       "hash": "sha256-6oYs472WzLjKNrjp57rvLaP7v73CVrrqqMioc5EQdOc="
     },
     {
-      "mvn-path": "com/github/liquidz/antq/2.10.1241/antq-2.10.1241.jar",
+      "mvn-path": "com/github/liquidz/antq/2.11.1250/antq-2.11.1250.jar",
       "mvn-repo": "https://repo.clojars.org/",
-      "hash": "sha256-4NwWEGVyyGfcPMejDnjW90Du9j0hh/IHZgwI0mr0i+8="
+      "hash": "sha256-O+zUZgF9YuaoaqwGK7it3hhGeFFwZyj/loQD9BRe66M="
     },
     {
-      "mvn-path": "com/github/liquidz/antq/2.10.1241/antq-2.10.1241.pom",
+      "mvn-path": "com/github/liquidz/antq/2.11.1250/antq-2.11.1250.pom",
       "mvn-repo": "https://repo.clojars.org/",
-      "hash": "sha256-bAK66FMmqXcYF4wS4ZqeYzhi8+PsQeC0TK0t66VG430="
+      "hash": "sha256-ANKiqg4a1oDzsvuP1BKYLrBBtVDJjT6bjS0tj3t5hOU="
     },
     {
       "mvn-path": "com/github/liquidz/rewrite-indented/0.2.44/rewrite-indented-0.2.44.jar",
@@ -728,14 +728,14 @@
       "hash": "sha256-2OgLA0KFMl6QX1RkmhWYtoe5pKmaOk9LlO7TWXyyEEg="
     },
     {
-      "mvn-path": "datalevin/datalevin/0.9.12/datalevin-0.9.12.jar",
+      "mvn-path": "datalevin/datalevin/0.9.13/datalevin-0.9.13.jar",
       "mvn-repo": "https://repo.clojars.org/",
-      "hash": "sha256-CBorGaZVg7+iYIrWNe7V+8I/qg2i45GS+Ttp0TRzDMU="
+      "hash": "sha256-ULPIl/GafN/WaQc4ksArLowAlmVRiIqQYVRwgkk1y7o="
     },
     {
-      "mvn-path": "datalevin/datalevin/0.9.12/datalevin-0.9.12.pom",
+      "mvn-path": "datalevin/datalevin/0.9.13/datalevin-0.9.13.pom",
       "mvn-repo": "https://repo.clojars.org/",
-      "hash": "sha256-TDy+JRh5GX47EfA8gD3JRMI9iMQftwrd7Aci7BReKyE="
+      "hash": "sha256-5oTa/oHqunBGKFKd9QHqJ1SjnEo19HYsiqIJbNFcQxw="
     },
     {
       "mvn-path": "dev/onionpancakes/chassis/1.0.365/chassis-1.0.365.jar",
