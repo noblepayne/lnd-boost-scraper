@@ -1,5 +1,8 @@
 (ns boost-scraper.boosties
-  (:require [datalevin.core :as d]))
+  (:require [datalevin.core :as d]
+            [boost-scraper.core :as core]
+            [clojure.string :as str]
+            [boost-scraper.reports :as reports]))
 
 (defn boosties-v1 [conn action]
   (d/q
@@ -40,21 +43,42 @@
          [?tx :boostagram/podcast "LINUX Unplugged"])]
    (d/db conn)))
 
+(defn boosties-v2 [conn regex action start]
+  (d/q '[:find ?sender (count ?e) (sum ?amount)
+         :in $ ?regex ?action ?start
+         :where
+         [?e :boostagram/action ?action]
+         [?e :invoice/created_at ?created_at]
+         [(<= ?start ?created_at)]
+         [?e :boostagram/podcast ?podcast]
+         [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+         (or [(re-matches ?regex ?podcast) _]
+             [(re-matches ?regex ?episode) _])
+         (not [?e :boostagram/sender_name_normalized "chrislas"])
+         (not [?e :boostagram/sender_name_normalized "noblepayne"])
+         [?e :boostagram/value_msat_total ?amount']
+         [(/ ?amount' 1000.0) ?amount]
+         [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]]
+       (d/db conn)
+       (or regex #"(?i).*li.*unplugged.*")
+       action
+       (or start #inst "2024-01-01T00:00Z")))
+
 (defn boosts-by-total-amount [conn]
-  (->> (boosties-v1 conn "boost")
-       (sort-by #(nth % 3) #(compare %2 %1))))
+  (->> (boosties-v2 conn nil "boost" nil)
+       (sort-by #(nth % 2) #(compare %2 %1))))
 
 (defn boosts-by-number [conn]
-  (->> (boosties-v1 conn "boost")
-       (sort-by #(nth % 2) #(compare %2 %1))))
+  (->> (boosties-v2 conn nil "boost" nil)
+       (sort-by #(nth % 1) #(compare %2 %1))))
 
 (defn streams-by-total-amount [conn]
-  (->> (boosties-v1 conn "stream")
-       (sort-by #(nth % 3) #(compare %2 %1))))
+  (->> (boosties-v2 conn nil "stream" nil)
+       (sort-by #(nth % 2) #(compare %2 %1))))
 
 (defn streams-by-number [conn]
-  (->> (boosties-v1 conn "stream")
-       (sort-by #(nth % 2) #(compare %2 %1))))
+  (->> (boosties-v2 conn nil "stream" nil)
+       (sort-by #(nth % 1) #(compare %2 %1))))
 
 (defn sum-of-boosts [boosts]
   (reduce
@@ -69,16 +93,42 @@
    boosts))
 
 (comment
-  (boosties-v1 conn "boost")
+  (require '[boost-scraper.core :as core])
+  (def conn core/nodecan-conn)
 
-  (println "sent us the most sats")
-  (take 15 (boosts-by-total-amount conn))
-  (println "sent us the most boosts")
-  (take 15 (boosts-by-number conn))
-  (println "sent us the most streamed sats")
-  (take 15 (streams-by-total-amount conn))
-  (println "sent us the most streams")
-  (take 15 (streams-by-number conn))
+  (boosties-v1 conn "boost")
+  (println
+   (str
+    "Sent us the most sats"
+    "\n"
+    (str/join
+     "\n"
+     (for [[sender _ sent] (take 5 (boosts-by-total-amount conn))]
+       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))
+    "\n"
+    "\n"
+    "Sent us the most boosts"
+    "\n"
+    (str/join
+     "\n"
+     (for [[sender sent] (take 5 (boosts-by-number conn))]
+       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))
+    "\n"
+    "\n"
+    "Sent us the most streamed sats"
+    "\n"
+    (str/join
+     "\n"
+     (for [[sender _ sent] (take 5 (streams-by-total-amount conn))]
+       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))
+    "\n"
+    "\n"
+    "Sent us the most streams"
+    "\n"
+    (str/join
+     "\n"
+     (for [[sender sent] (take 5 (streams-by-number conn))]
+       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))))
 
   ;; total amount of sats from boosts
   (sum-of-boosts (boosts-by-total-amount conn))
@@ -91,4 +141,7 @@
   ;; total number of streamers
   (count (streams-by-total-amount conn))
   ;; total number of streams
-  (count-of-boosts (streams-by-total-amount conn)))
+  (count-of-boosts (streams-by-total-amount conn))
+
+  (boosties-v2 conn #"(?i).*li.*unplugged.*" "boost" #inst "2024-01-01T00:00Z")
+  (boosties-v2 conn nil "boost" nil))

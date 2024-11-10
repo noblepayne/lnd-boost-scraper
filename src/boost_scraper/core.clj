@@ -279,7 +279,7 @@
      (scrape-alby-boosts-until-epoch
       alby-conn
       alby/alby-token
-      (->epoch #inst "2024-09-01T00:00")
+      (->epoch #inst "2023-12-31T11:59")
       2000)
      (println "alby sync complete")))
 
@@ -288,7 +288,7 @@
      (scrape-lnd-boosts-until-epoch
       lnd-conn
       lnd/macaroon
-      (->epoch #inst "2024-09-01T00:00")
+      (->epoch #inst "2023-12-31T11:59")
       50)
      (println "lnd sync complete")))
 
@@ -297,7 +297,7 @@
      (scrape-nodecan-boosts-until-epoch
       nodecan-conn
       lnd/nodecan-macaroon
-      (->epoch #inst "2024-09-01T00:00")
+      (->epoch #inst "2023-12-31T11:59")
       500)
      (println "nodecan sync complete")))
 
@@ -327,8 +327,8 @@
        (d/db alby-conn))
 
   ;; diffing between upstreams
-  (sync-mising-boosts! nodecan-conn alby-conn (->epoch #inst "2024-07-01T07:00"))
-  (sync-mising-boosts! nodecan-conn lnd-conn (->epoch #inst "2024-07-01T07:00"))
+  (sync-mising-boosts! nodecan-conn alby-conn (->epoch #inst "2023-12-31T11:59"))
+  (sync-mising-boosts! nodecan-conn lnd-conn (->epoch #inst "2023-12-31T11:59"))
 
   (sync-mising-boosts! nodecan-conn alby-conn 1)
   (sync-mising-boosts! nodecan-conn lnd-conn 1)
