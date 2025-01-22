@@ -36,7 +36,7 @@
                 # https://devenv.sh/reference/options/
                 packages = [
                   pkgs.git
-                  pkgs.babashka
+                  #pkgs.babashka
                   pkgs.jet
                   pkgs.neovim
                   pkgs.cljfmt
