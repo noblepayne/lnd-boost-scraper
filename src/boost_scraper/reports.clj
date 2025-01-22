@@ -47,7 +47,7 @@
             [(< ?last-seen-timestamp' ?creation_date)]
                 ;; filter out those troublemakers
             (not [?e :boostagram/sender_name_normalized "chrislas"])
-            (not [?e :boostagram/sender_name_normalized "noblepayne"])
+            #_(not [?e :boostagram/sender_name_normalized "noblepayne"])
                 ;; temp filters
             (not [?e :boostagram/sender_name_normalized "noblepaine"])
             (not [?e :boostagram/sender_name_normalized "testwes3"])
