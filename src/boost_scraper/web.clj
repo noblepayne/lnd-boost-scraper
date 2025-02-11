@@ -33,7 +33,8 @@
    "LINUX Unplugged" "(?i).*unplugged.*"
    "Coder Radio" "(?i).*coder.*"
    "Self-Hosted" "(?i).*hosted.*"
-   "This Week in Bitcoin" "(?i).*bitcoin.*"})
+   "This Week in Bitcoin" "(?i).*bitcoin.*"
+   "The Launch 🚀" "(?i).*launch.*"})
 
 (defn two-weeks-ago []
   (let [now (/ (System/currentTimeMillis) 1000)
