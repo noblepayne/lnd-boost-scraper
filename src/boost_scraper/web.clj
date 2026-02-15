@@ -2,6 +2,7 @@
   (:require [aleph.http :as http]
             [babashka.http-client :as httpc]
             [boost-scraper.reports :as reports]
+            [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.math :as math]
             [clojure.string :as str]
@@ -44,59 +45,67 @@
 ;; TODO: consolidate CSS?
 (defn get-boosts [db-conn]
   (fn [request]
-    (let [{{:strs [show since]} :params} request
-          default-since (two-weeks-ago)]
-      {:status 200
-       :headers {"content-type" "text/html; charset=utf-8"}
-       :body
-       (html/html
-        [html/doctype-html5
-         [:html
-          [:head
-           [:meta {:charset "utf-8"}]
-           [:meta {:name "viewport", :content "width=device-width, initial-scale=1"}]
-           [:meta {:name "color-scheme", :content "light dark"}]
-           [:meta {:http-equiv "refresh", :content "60"}]
-           [:title "Boosts!"]
-           [:style (html/raw pico-classless)]
-           [:style (html/raw (str "div#report blockquote {padding-bottom: 0px;
-                                                          padding-top: 0px;}"))]
-           [:script {:type "text/javascript"}
-            (html/raw js)]
-           [:body
-            [:main
-             [:div
-              [:h1 [:a {:href "/boosts" :style {:color "inherit" :text-decoration-color "inherit"}} "Boost Report"]]
-              (if (not (and show since))
-                ;; Query form
-                [:form {:action "/boosts"}
-                 [:label {:for "showselect"} "Show:"]
-                 [:select#showselect {:name "show"}
-                  (for [show-option (keys show->regex)]
-                    [:option {:value (show->regex show-option)
-                              :selected (= show show-option)} show-option])]
-                 [:label {:for "since"} "Last Seen Timestamp:"]
-                 [:input#since {:name "since" :type "text" :value default-since}]
-                 [:input {:type "submit" :value "Get Boosts!"}]]
-                ;; Query results
-                (let [show (re-pattern show)
-                      since (Integer/parseInt since)
-                      report (reports/boost-report db-conn show since)
-                      ;; hacky prototype helipad replacement
-                      #_(str/join "\n" (map #(reports/format-boost-batch-details [%])
-                                            (sort-by :invoice/creation_date
-                                                     #(compare %2 %1)
-                                                     (into [] cat (reports/get-boost-summary-for-report' db-conn show since)))))]
-                  [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
-                   [:div {:style {"padding" "10px"}}
-                    [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]
-                    [:button#downloadMarkdown {:onClick "downloadMarkdown()" :style {:display "inline" :margin-left "10px"}} "Download Markdown"]]
-                   [:textarea#markdown {:style {:display "none" :position "absolute" :left "-1000px" :top "-1000px"}} report]
-                   [:div#report {:style {:margin-top "10px"
-                                         :margin-bottom "10px"
-                                         :margin-left "50px"
-                                         :margin-right "50px"}}
-                    (markdown/parse-body report)]]))]]]]]])})))
+    (let [{{:strs [show since json]} :params} request
+          default-since (two-weeks-ago)
+          json-mode (= json "true")]
+      (if (and json-mode show since)
+        (let [show (re-pattern show)
+              since (Integer/parseInt since)
+              data (reports/sort-report (reports/get-boost-summary-for-report db-conn show since))]
+          {:status 200
+           :headers {"content-type" "application/json"}
+           :body (json/generate-string data)})
+        {:status 200
+         :headers {"content-type" "text/html; charset=utf-8"}
+         :body
+         (html/html
+          [html/doctype-html5
+           [:html
+            [:head
+             [:meta {:charset "utf-8"}]
+             [:meta {:name "viewport", :content "width=device-width, initial-scale=1"}]
+             [:meta {:name "color-scheme", :content "light dark"}]
+             [:meta {:http-equiv "refresh", :content "60"}]
+             [:title "Boosts!"]
+             [:style (html/raw pico-classless)]
+             [:style (html/raw (str "div#report blockquote {padding-bottom: 0px;
+                                                           padding-top: 0px;}"))]
+             [:script {:type "text/javascript"}
+              (html/raw js)]
+             [:body
+              [:main
+               [:div
+                [:h1 [:a {:href "/boosts" :style {:color "inherit" :text-decoration-color "inherit"}} "Boost Report"]]
+                (if (not (and show since))
+                  ;; Query form
+                  [:form {:action "/boosts"}
+                   [:label {:for "showselect"} "Show:"]
+                   [:select#showselect {:name "show"}
+                    (for [show-option (keys show->regex)]
+                      [:option {:value (show->regex show-option)
+                                :selected (= show show-option)} show-option])]
+                   [:label {:for "since"} "Last Seen Timestamp:"]
+                   [:input#since {:name "since" :type "text" :value default-since}]
+                   [:input {:type "submit" :value "Get Boosts!"}]]
+                  ;; Query results
+                  (let [show (re-pattern show)
+                        since (Integer/parseInt since)
+                        report (reports/boost-report db-conn show since)
+                        ;; hacky prototype helipad replacement
+                        #_(str/join "\n" (map #(reports/format-boost-batch-details [%])
+                                              (sort-by :invoice/creation_date
+                                                       #(compare %2 %1)
+                                                       (into [] cat (reports/get-boost-summary-for-report' db-conn show since)))))]
+                    [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
+                     [:div {:style {"padding" "10px"}}
+                      [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]
+                      [:button#downloadMarkdown {:onClick "downloadMarkdown()" :style {:display "inline" :margin-left "10px"}} "Download Markdown"]]
+                     [:textarea#markdown {:style {:display "none" :position "absolute" :left "-1000px" :top "-1000px"}} report]
+                     [:div#report {:style {:margin-top "10px"
+                                           :margin-bottom "10px"
+                                           :margin-left "50px"
+                                           :margin-right "50px"}}
+                      (markdown/parse-body report)]]))]]]]]])}))))
 
 ;; Top Level HTTP
 (defn routes [db-conn]
@@ -143,4 +152,4 @@
   ;; `#'` allows reloading by redef-ing http-handler'
   (def server (http/start-server #'http-handler' {:port 9999 :executor :none}))
   (.close server)
-  (->  "http://localhost:9999/ping" httpc/get :body print))
+  (-> "http://localhost:9999/ping" httpc/get :body print))
