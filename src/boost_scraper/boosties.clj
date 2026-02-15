@@ -10,7 +10,7 @@
      :in $ ?action
      :where
      [?tx :invoice/created_at ?created_at]
-     [(>= ?created_at #inst "2024-01-01T00:00:00")]
+     [(>= ?created_at #inst "2025-01-01T00:00:00")]
      [?tx :boostagram/action ?action]
      [(get-else $ ?tx :boostagram/sender_name_normalized "N/A") ?sender]
      [?tx :boostagram/value_msat_total ?_amount]
@@ -30,7 +30,7 @@
      :in $
      :where
      [?tx :invoice/created_at ?created_at]
-     [(>= ?created_at #inst "2023-01-01T00:00:00")]
+     [(>= ?created_at #inst "2025-01-01T00:00:00")]
      [?tx :boostagram/action ?action]
      [(get-else $ ?tx :boostagram/sender_name_normalized "N/A") ?sender]
      [?tx :boostagram/value_msat_total ?_amount]
@@ -62,7 +62,7 @@
        (d/db conn)
        (or regex #"(?i).*li.*unplugged.*")
        action
-       (or start #inst "2024-01-01T00:00Z")))
+       (or start #inst "2025-01-01T00:00Z")))
 
 (defn boosties-v2-no-action [conn regex start]
   (d/q '[:find ?sender (count ?e) (sum ?amount)
@@ -81,7 +81,7 @@
          [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]]
        (d/db conn)
        (or regex #"(?i).*li.*unplugged.*")
-       (or start #inst "2024-01-01T00:00Z")))
+       (or start #inst "2025-01-01T00:00Z")))
 
 (defn boosts-by-total-amount [conn]
   (->> (boosties-v2 conn nil "boost" nil)
@@ -170,9 +170,9 @@
   (count-of-boosts (streams-by-total-amount conn))
 
   (boosties-v2 conn #"(?i).*li.*unplugged.*" "boost" #inst "2024-01-01T00:00Z")
+
+  (boosties-v2 conn #"(?i).*li.*unplugged.*" "boost" #inst "2025-01-01T00:00Z")
   (boosties-v2 conn nil "boost" nil))
-
-
 
 (defn boosties-clients [conn regex start]
   (d/q '[:find ?client (count ?e)

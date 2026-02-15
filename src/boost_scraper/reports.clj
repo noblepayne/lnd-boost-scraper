@@ -71,7 +71,8 @@
             (not [?e :boostagram/sender_name_normalized "noblepayne-nope"])
             (not [?e :boostagram/sender_name_normalized "noblepayne-test"])
             (not [?e :boostagram/sender_name_normalized "breezywes"])
-                ;; match our particular show
+            ;; match our particular show
+            ;; TODO: support no podcast being specified
             [?e :boostagram/podcast ?podcast]
             [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
             (or [(re-matches ?regex' ?podcast) _]

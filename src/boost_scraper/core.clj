@@ -258,6 +258,9 @@
   (def alby-conn (d/get-conn (System/getenv "ALBY_DBI") db/schema))
   (def lnd-conn (d/get-conn (System/getenv "JBNODE_DBI") db/schema))
   (def nodecan-conn (d/get-conn (System/getenv "NODECAN_DBI") db/schema))
+  (def nodecan-conn (d/get-conn "/dev/shm/boosties" db/schema))
+
+  (count (d/datoms (d/db nodecan-conn) :eav))
 
   (count (d/datoms (d/db alby-conn) :eav))
   (d/datoms (d/db alby-conn) :eav 1)
