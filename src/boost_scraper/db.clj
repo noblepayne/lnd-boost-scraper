@@ -24,6 +24,8 @@
    :boostagram/message {:db/valueType :db.type/string}
    :boostagram/value_msat_total {:db/valueType :db.type/long}
    :boostagram/value_sat_total {:db/valueType :db.type/long}
+   :boostagram/ts {:db/valueType :db.type/long}
+   :boostagram/time {:db/valueType :db.type/string}
    :scraper/source {:db/valueType :db.type/string}
    :boostagram/content_id {:db/valueType :db.type/string
                            ;; TODO: enable uniqueness after we're sure this is unique enough
