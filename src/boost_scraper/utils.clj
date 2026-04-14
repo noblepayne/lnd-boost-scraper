@@ -6,6 +6,14 @@
       (.atZone (java.time.ZoneId/of "America/Los_Angeles"))
       (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy/MM/dd h:mm:ss a zzz"))))
 
+(defn format-seconds [seconds]
+  (let [hours (quot seconds 3600)
+        mins (quot (mod seconds 3600) 60)
+        secs (mod seconds 60)]
+    (if (pos? hours)
+      (format "%d:%02d:%02d" hours mins secs)
+      (format "%d:%02d" mins secs))))
+
 (defn apply-virtual
   "Returns a CompletableFuture eventually containing (apply f args)."
   [f & args]
