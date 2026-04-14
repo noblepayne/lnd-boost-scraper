@@ -31,7 +31,9 @@
 ;; Routes
 (def show->regex
   {"All Shows" ".*"
+   "All Shows (+ Unknown)" ".*|Unknown Podcast"
    "LINUX Unplugged" "(?i).*unplugged.*"
+   "LINUX Unplugged (+ Unknown)" "(?i).*unplugged.*|Unknown Podcast"
    "Coder Radio" "(?i).*coder.*"
    "Self-Hosted" "(?i).*hosted.*"
    "This Week in Bitcoin" "(?i).*bitcoin.*"
@@ -68,8 +70,8 @@
              [:meta {:http-equiv "refresh", :content "60"}]
              [:title "Boosts!"]
              [:style (html/raw pico-classless)]
-             [:style (html/raw (str "div#report blockquote {padding-bottom: 0px;
-                                                           padding-top: 0px;}"))]
+             [:style (html/raw "div#report blockquote {padding-bottom: 0px;
+                                                           padding-top: 0px;}")]
              [:script {:type "text/javascript"}
               (html/raw js)]
              [:body
