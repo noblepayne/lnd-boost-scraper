@@ -6,7 +6,6 @@
             [datalevin.core :as d]))
 
 (defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
-  #_:clj-kondo/ignore ;; FIXME: kondo doesn't like (get-else ...)?
   (d/q '[:find (d/pull ?e [:db/id
                            :invoice/identifier
                            :invoice/created_at
@@ -17,7 +16,8 @@
                            :boostagram/podcast
                            :boostagram/episode
                            :boostagram/app_name
-                           :boostagram/message])
+                           :boostagram/message
+                           :boostagram/ts])
          :in $ ?regex' ?last-seen-timestamp'
          :where
          [?e :invoice/creation_date ?creation_date]
@@ -26,8 +26,8 @@
          (not [?e :boostagram/sender_name_normalized "chrislas"])
          (not [?e :boostagram/sender_name_normalized "noblepayne"])
          [?e :boostagram/action "boost"]
-         ;; match our particular show
-         [?e :boostagram/podcast ?podcast]
+          ;; match our particular show
+         [(get-else $ ?e :boostagram/podcast "Unknown Podcast") ?podcast]
          [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
          (or [(re-matches ?regex' ?podcast) _]
              [(re-matches ?regex' ?episode) _])]
@@ -73,7 +73,7 @@
             (not [?e :boostagram/sender_name_normalized "breezywes"])
             ;; match our particular show
             ;; TODO: support no podcast being specified
-            [?e :boostagram/podcast ?podcast]
+            [(get-else $ ?e :boostagram/podcast "Unknown Podcast") ?podcast]
             [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
             (or [(re-matches ?regex' ?podcast) _]
                 [(re-matches ?regex' ?episode) _])]
@@ -120,6 +120,7 @@
                                    :boostagram/podcast
                                    :boostagram/episode
                                    :boostagram/app_name
+                                   :boostagram/ts
                                    :invoice/created_at
                                    :invoice/creation_date
                                    :invoice/identifier
@@ -236,6 +237,8 @@
                   boostagram/podcast
                   boostagram/episode
                   boostagram/app_name
+                  boostagram/ts
+                  boostagram/time
                   #_invoice/identifier
                   invoice/creation_date
                   scraper/source]} boost]
@@ -243,6 +246,9 @@
             "+ " episode "\n"
             "+ " app_name "\n"
             "+ " source "\n"
+            (when (or ts time)
+              (let [display-ts (or ts time)]
+                (str "+ at " (if (string? display-ts) display-ts (utils/format-seconds display-ts)) "\n")))
             #_("+ " identifier "\n")
             "\n"
             "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
