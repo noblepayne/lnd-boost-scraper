@@ -16,7 +16,7 @@
   (get-boosts [_ {:keys [token offset wait items after since] :as last_}]
     (when @upstream/scrape
       (println "Alby still going!" offset)
-      (let [offset (or offset (or (:page last_) 1))
+      (let [offset (or offset (:page last_) 1)
             query-params {:items (or items 100) :page offset}
             query-params (if after
                            (assoc query-params

@@ -1,7 +1,8 @@
 (ns boost-scraper.boosties
-  (:require [datalevin.core :as d]
-            [boost-scraper.core :as core]
+  (:require [clojure.math :as math]
             [clojure.string :as str]
+            [datalevin.core :as d]
+            [boost-scraper.core :as core]
             [boost-scraper.reports :as reports]))
 
 (defn boosties-v1 [conn action]
@@ -116,7 +117,8 @@
    boosts))
 
 (comment
-  (require '[boost-scraper.core :as core])
+  ;; REPL scratch space
+  (require '[boost-scraper.core :as core] :reload)
   (def conn core/nodecan-conn)
 
   (boosties-v1 conn "boost")
@@ -128,7 +130,7 @@
     (str/join
      "\n"
      (for [[sender _ sent] (reverse (take 5 (boosts-by-total-amount conn)))]
-       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))
+       (str sender " " (boost-scraper.reports/int-comma (math/round sent)))))
     "\n"
     "\n"
     "Sent us the most boosts"
@@ -136,7 +138,7 @@
     (str/join
      "\n"
      (for [[sender sent] (reverse (take 5 (boosts-by-number conn)))]
-       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))
+       (str sender " " (boost-scraper.reports/int-comma (math/round sent)))))
     "\n"
     "\n"
     "Sent us the most streamed sats"
@@ -144,7 +146,7 @@
     (str/join
      "\n"
      (for [[sender _ sent] (reverse (take 5 (streams-by-total-amount conn)))]
-       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))
+       (str sender " " (boost-scraper.reports/int-comma (math/round sent)))))
     "\n"
     "\n"
     "Sent us the most streams"
@@ -152,7 +154,7 @@
     (str/join
      "\n"
      (for [[sender sent] (reverse (take 5 (streams-by-number conn)))]
-       (str sender " " (boost-scraper.reports/int-comma (clojure.math/round sent)))))))
+       (str sender " " (boost-scraper.reports/int-comma (math/round sent)))))))
 
   ;; total from boosts and streams
   (sum-of-boosts (total-v4v conn))

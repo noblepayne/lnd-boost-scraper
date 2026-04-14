@@ -5,6 +5,7 @@
 .env
 .lsp
 .nrepl-port
+.clojure-mcp
 age_key.txt
 decrypted_secrets
 result
