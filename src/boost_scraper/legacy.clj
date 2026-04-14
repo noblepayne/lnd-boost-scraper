@@ -209,10 +209,10 @@
            "+ Unique Streamers: " (v1/int-comma streamers) "\n")))
 
 (comment
-
+  #_{:clj-kondo/ignore [:unresolved-symbol]}
   (boost-report-v2 conn #"(?i).*linux.*" (-> #inst "2024-07-01T00:00Z" (#(.getTime %)) (/ 1000)))
   (boost-report-v2 conn #"(?i).*self.*" "443250")
 
   (boost-report-v2 conn #"(?i).*linux.*" "450565")
-
+  #_{:clj-kondo/ignore [:unresolved-symbol]}
   (make-stream-summary conn #"(?i).*self.*" "443250"))
