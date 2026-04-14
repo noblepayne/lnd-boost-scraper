@@ -2,6 +2,7 @@
   (:require [aleph.http :as http]
             [babashka.http-client :as httpc]
             [boost-scraper.reports :as reports]
+            [boost-scraper.shows :as shows]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.math :as math]
@@ -13,6 +14,12 @@
             [reitit.ring :as ring]
             [reitit.ring.middleware.parameters]
             [reitit.ring.middleware.muuntaja :as muuntaja]))
+
+;; Routes
+(defn two-weeks-ago []
+  (let [now (/ (System/currentTimeMillis) 1000)
+        two-weeks-ago (- now (* 2 60 60 24 7))]
+    (math/round two-weeks-ago)))
 
 ;; CSS
 (def pico-classless
@@ -28,35 +35,28 @@
         (slurp (io/resource "boost_report.js")))
        "\n"))
 
-;; Routes
-(def show->regex
-  {"All Shows" ".*"
-   "All Shows (+ Unknown)" ".*|Unknown Podcast"
-   "LINUX Unplugged" "(?i).*unplugged.*"
-   "LINUX Unplugged (+ Unknown)" "(?i).*unplugged.*|Unknown Podcast"
-   "Coder Radio" "(?i).*coder.*"
-   "Self-Hosted" "(?i).*hosted.*"
-   "This Week in Bitcoin" "(?i).*bitcoin.*"
-   "The Launch 🚀" "(?i).*launch.*"})
-
-(defn two-weeks-ago []
-  (let [now (/ (System/currentTimeMillis) 1000)
-        two-weeks-ago (- now (* 2 60 60 24 7))]
-    (math/round two-weeks-ago)))
-
-;; TODO: consolidate CSS?
 (defn get-boosts [db-conn]
   (fn [request]
-    (let [{{:strs [show since json]} :params} request
+    (let [{{:strs [show since json include-unknown]} :params} request
           default-since (two-weeks-ago)
-          json-mode (= json "true")]
-      (if (and json-mode show since)
-        (let [show (re-pattern show)
+          json-mode (= json "true")
+          include-unknown (if (some? include-unknown) (= include-unknown "true") true)
+          show-regex (shows/regex-for show include-unknown)]
+      (cond
+        (and json-mode show since show-regex)
+        (let [show (re-pattern show-regex)
               since (Integer/parseInt since)
               data (reports/sort-report (reports/get-boost-summary-for-report db-conn show since))]
           {:status 200
            :headers {"content-type" "application/json"}
            :body (json/generate-string data)})
+
+        (and show (not show-regex))
+        {:status 400
+         :headers {"content-type" "application/json"}
+         :body (json/generate-string {:error (str "Invalid show: " show)})}
+
+        :else
         {:status 200
          :headers {"content-type" "text/html; charset=utf-8"}
          :body
@@ -83,21 +83,16 @@
                   [:form {:action "/boosts"}
                    [:label {:for "showselect"} "Show:"]
                    [:select#showselect {:name "show"}
-                    (for [show-option (keys show->regex)]
-                      [:option {:value (show->regex show-option)
-                                :selected (= show show-option)} show-option])]
+                    (for [show-option (shows/show-options include-unknown)]
+                      [:option {:value (:slug show-option)
+                                :selected (= (some-> show str/lower-case) (:slug show-option))} (:name show-option)])]
                    [:label {:for "since"} "Last Seen Timestamp:"]
                    [:input#since {:name "since" :type "text" :value default-since}]
                    [:input {:type "submit" :value "Get Boosts!"}]]
                   ;; Query results
-                  (let [show (re-pattern show)
+                  (let [show (re-pattern show-regex)
                         since (Integer/parseInt since)
-                        report (reports/boost-report db-conn show since)
-                        ;; hacky prototype helipad replacement
-                        #_(str/join "\n" (map #(reports/format-boost-batch-details [%])
-                                              (sort-by :invoice/creation_date
-                                                       #(compare %2 %1)
-                                                       (into [] cat (reports/get-boost-summary-for-report' db-conn show since)))))]
+                        report (reports/boost-report db-conn show since)]
                     [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
                      [:div {:style {"padding" "10px"}}
                       [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]
@@ -113,6 +108,13 @@
 (defn routes [db-conn]
   [["/ping"
     {:get {:handler (fn [_] {:status 200 :body "pong\n"})}}]
+   ["/api/v1/shows"
+    {:get {:handler (fn [request]
+                      (let [include-unknown-param (get-in request [:params "include-unknown"])
+                            include-unknown (or (= include-unknown-param "true") (nil? include-unknown-param))]
+                        {:status 200
+                         :headers {"content-type" "application/json"}
+                         :body (json/generate-string {:shows (shows/show-options include-unknown)})}))}}]
    ["/boosts" {:get {:handler (get-boosts db-conn)}}]])
 
 (defn http-handler [db-conn]
