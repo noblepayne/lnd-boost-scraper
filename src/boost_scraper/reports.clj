@@ -226,42 +226,64 @@
                :last_seen_id last_seen_id
                :total_unique_boosters total_unique_boosters}}))
 
-(defn int-comma [n] (clojure.pprint/cl-format nil "~:d"  (float (or n 0))))
+(defn int-comma [n] (clojure.pprint/cl-format nil "~:d" (or n 0)))
 
-(defn format-boost-batch-details [[boost & batch]]
-  (str/join
-   "\n"
-   (concat
-    (let [{:keys [boostagram/message
-                  boostagram/value_sat_total
-                  boostagram/podcast
-                  boostagram/episode
-                  boostagram/app_name
-                  boostagram/ts
-                  boostagram/time
-                  #_invoice/identifier
-                  invoice/creation_date
-                  scraper/source]} boost]
-      [(str "+ " podcast "\n"
-            "+ " episode "\n"
-            "+ " app_name "\n"
-            "+ " source "\n"
-            (when (or ts time)
-              (let [display-ts (or ts time)]
-                (str "+ at " (if (string? display-ts) display-ts (utils/format-seconds display-ts)) "\n")))
-            #_("+ " identifier "\n")
-            "\n"
-            "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
-            "+ " (int-comma value_sat_total) " sats\n"
-            (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))])
-    (for [{:keys [boostagram/message boostagram/value_sat_total
-                  invoice/creation_date
-                  #_invoice/identifier]} batch]
-      (str "\n"
-           #_("+ " identifier "\n")
-           "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
-           "+ " (int-comma value_sat_total) " sats\n"
-           (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))))))
+(defn score-metadata
+  "Score a boost by richness of metadata.
+   Higher score = more info available."
+  [b]
+  (+ (if (:boostagram/podcast b) 5 0)
+     (if (:boostagram/episode b) 4 0)
+     (if (or (:boostagram/ts b) (:boostagram/time b)) 3 0)
+     (if (:boostagram/app_name b) 2 0)
+     (if (:scraper/source b) 1 0)))
+
+(defn best-metadata
+  "Returns the boost with the 'best' (richest) metadata from the batch.
+   Uses scoring: podcast(5) > episode(4) > ts/time(3) > app_name(2) > source(1)"
+  [boosts]
+  (if (seq boosts)
+    (apply max-key score-metadata boosts)
+    nil))
+
+(defn format-boost-batch-details [boosts]
+  (let [best (best-metadata boosts)
+        others (if best
+                 (remove #(identical? % best) boosts)
+                 boosts)]
+    (str/join
+     "\n"
+     (concat
+      (let [{:keys [boostagram/message
+                    boostagram/value_sat_total
+                    boostagram/podcast
+                    boostagram/episode
+                    boostagram/app_name
+                    boostagram/ts
+                    boostagram/time
+                    #_invoice/identifier
+                    invoice/creation_date
+                    scraper/source]} best]
+        [(str
+          (when podcast (str "+ " podcast "\n"))
+          (when episode (str "+ " episode "\n"))
+          (when app_name (str "+ " app_name "\n"))
+          (when source (str "+ " source "\n"))
+          (when (or ts time)
+            (let [display-ts (or ts time)]
+              (str "+ at " (if (string? display-ts) display-ts (utils/format-seconds display-ts)) "\n")))
+          "\n"
+          "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
+          "+ " (int-comma value_sat_total) " sats\n"
+          (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))])
+      (for [{:keys [boostagram/message boostagram/value_sat_total
+                    invoice/creation_date
+                    #_invoice/identifier]} others]
+        (str "\n"
+             #_("+ " identifier "\n")
+             "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
+             "+ " (int-comma value_sat_total) " sats\n"
+             (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :("))))))))))
 
 (defn format-boost-batch [{:keys [sender total count boosts]}]
   (str "### From: " sender "\n"
