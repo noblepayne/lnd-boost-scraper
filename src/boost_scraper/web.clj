@@ -40,7 +40,7 @@
     (let [{{:strs [show since json include-unknown]} :params} request
           default-since (two-weeks-ago)
           json-mode (= json "true")
-          include-unknown (if (some? include-unknown) (= include-unknown "true") true)
+          include-unknown (not= include-unknown "false")
           show-regex (shows/regex-for show include-unknown)]
       (cond
         (and json-mode show since show-regex)
@@ -86,7 +86,10 @@
                     (for [show-option (shows/show-options include-unknown)]
                       [:option {:value (:slug show-option)
                                 :selected (= (some-> show str/lower-case) (:slug show-option))} (:name show-option)])]
-                   [:label {:for "since"} "Last Seen Timestamp:"]
+                   [:label {:for "include-unknown"}
+                    [:input#include-unknown {:name "include-unknown" :type "checkbox" :checked include-unknown}]
+                    " Include Unknown:"]
+                   [:label {:for "since"} " Last Seen Timestamp:"]
                    [:input#since {:name "since" :type "text" :value default-since}]
                    [:input {:type "submit" :value "Get Boosts!"}]]
                   ;; Query results
