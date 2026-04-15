@@ -28,12 +28,19 @@
    :boostagram/time {:db/valueType :db.type/string}
    :scraper/source {:db/valueType :db.type/string}
    :boostagram/content_id {:db/valueType :db.type/string
-                           ;; TODO: enable uniqueness after we're sure this is unique enough
-                           ;; N.B. how does it work for streams? What is someone streams the same show twice?
-                           #_:db/unique #_:db.unique/identity}}
-    ;;
-    ;; :table/column {:db/valueType :db.type/...}
-  )
+                          ;; TODO: enable uniqueness after we're sure this is unique enough
+                          ;; N.B. how does it work for streams? What is someone streams the same show twice?
+                           #_:db/unique #_:db.unique/identity}
+   ;; Client state for agent tracking
+   :client-state/key {:db/valueType :db.type/string
+                      :db/unique :db.unique/identity}
+   :client-state/client-id {:db/valueType :db.type/string}
+   :client-state/show-slug {:db/valueType :db.type/string}
+   :client-state/last-seen-tx {:db/valueType :db.type/long}
+   :client-state/last-accessed-tx {:db/valueType :db.type/long}
+   ;;
+   ;; :table/column {:db/valueType :db.type/...}
+   })
 
 (defn remove-nil-vals [m]
   (->> m
