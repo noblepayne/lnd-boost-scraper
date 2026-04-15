@@ -1,9 +1,44 @@
 (ns boost-scraper.reports
   (:require [boost-scraper.utils :as utils]
+            [boost-scraper.schemas :as schemas]
             [clojure.instant]
             [clojure.string :as str]
             [clojure.pprint :as pprint]
-            [datalevin.core :as d]))
+            [datalevin.core :as d]
+            [malli.core :as m]
+            [malli.transform :as mt]))
+
+(def ReportSchema
+  [:map
+   [:ballers {:default []} [:vector [:map {:closed false}]]]
+   [:boosts {:default []} [:vector [:map {:closed false}]]]
+   [:thanks {:default []} [:vector [:map {:closed false}]]]
+   [:boost-summary
+    [:map
+     [:boost_total_sats {:default 0} :int]
+     [:boost_total_boosts {:default 0} :int]
+     [:boost_total_boosters {:default 0} :int]]]
+   [:stream-summary
+    [:map
+     [:stream_total_sats {:default 0} :int]
+     [:stream_total_streams {:default 0} :int]
+     [:stream_total_streamers {:default 0} :int]]]
+   [:summary
+    [:map
+     [:total_sats {:default 0} :int]
+     [:total_invoices {:default 0} :int]
+     [:total_unique_boosters {:default 0} :int]
+     [:last_seen_id [:maybe :int]]]]])
+
+(def report-transformer
+  (mt/transformer
+   (mt/default-value-transformer)
+   (mt/string-transformer)))
+
+(defn normalize-report
+  "Normalize report data using ReportSchema to ensure consistent defaults."
+  [data]
+  (m/decode ReportSchema data report-transformer))
 
 (defn get-boost-summary-for-report' [conn show-regex last-seen-timestamp]
   (d/q '[:find (d/pull ?e [:db/id
@@ -215,16 +250,16 @@
     {:ballers (sort-by :total #(compare %2 %1) (map sort-boosts ballers))
      :boosts (sort-by :mindate (map sort-boosts boosts))
      :thanks (sort-by :mindate (map sort-boosts thanks))
-     :boost-summary {:boost_total_sats boost_total_sats
-                     :boost_total_boosts boost_total_boosts
-                     :boost_total_boosters boost_total_boosters}
-     :stream-summary {:stream_total_sats stream_total_sats
-                      :stream_total_streams stream_total_streams
-                      :stream_total_streamers stream_total_streamers}
-     :summary {:total_sats total_sats
-               :total_invoices total_invoices
+     :boost-summary {:boost_total_sats (or boost_total_sats 0)
+                     :boost_total_boosts (or boost_total_boosts 0)
+                     :boost_total_boosters (or boost_total_boosters 0)}
+     :stream-summary {:stream_total_sats (or stream_total_sats 0)
+                      :stream_total_streams (or stream_total_streams 0)
+                      :stream_total_streamers (or stream_total_streamers 0)}
+     :summary {:total_sats (or total_sats 0)
+               :total_invoices (or total_invoices 0)
                :last_seen_id last_seen_id
-               :total_unique_boosters total_unique_boosters}}))
+               :total_unique_boosters (or total_unique_boosters 0)}}))
 
 (defn int-comma [n] (clojure.pprint/cl-format nil "~:d" (or n 0)))
 
@@ -325,10 +360,11 @@
 (defn boost-report [conn show-regex last-seen-id]
   (->> (get-boost-summary-for-report conn show-regex last-seen-id)
        sort-report
+       normalize-report
        format-sorted-report))
 
 (defn first-booster [conn episode]
-  (d/q '[:find [(d/pull ?entity [:boostagram/sender_name  ;; what fields we want to see on the entity
+  (d/q '[:find [(d/pull ?entity [:boostagram/sender_name ;; what fields we want to see on the entity
                                  :invoice/created_at
                                  :boostagram/app_name
                                  :boostagram/value_sat_total])]
