@@ -3,6 +3,7 @@
             [babashka.http-client :as httpc]
             [boost-scraper.reports :as reports]
             [boost-scraper.shows :as shows]
+            [boost-scraper.client-state :as client-state]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.math :as math]
@@ -37,16 +38,30 @@
 
 (defn get-boosts [db-conn]
   (fn [request]
-    (let [{{:strs [show since json include-unknown]} :params} request
+    (let [{{:strs [show since json include-unknown client]} :params} request
           default-since (two-weeks-ago)
           json-mode (= json "true")
           include-unknown (not= include-unknown "false")
-          show-regex (shows/regex-for show include-unknown)]
+          show-regex (shows/regex-for show include-unknown)
+          client-id (when (and client (seq client) (< (count client) 256)) client)
+          show-slug (when show-regex (or (some-> show shows/resolve-show :slug) show))
+          resolved-since (cond
+                           (and since (re-matches #"^\d+$" since)) (Integer/parseInt since)
+                           (and client-id show-slug)
+                           (some-> (client-state/get-client-state db-conn client-id show-slug)
+                                   :client-state/last-seen-tx)
+                           :else default-since)]
       (cond
-        (and json-mode show since show-regex)
-        (let [show (re-pattern show-regex)
-              since (Integer/parseInt since)
-              data (reports/sort-report (reports/get-boost-summary-for-report db-conn show since))]
+        (and json-mode show show-regex resolved-since)
+        (let [show-pattern (re-pattern show-regex)
+              data (-> (reports/get-boost-summary-for-report db-conn show-pattern resolved-since)
+                       reports/sort-report
+                       reports/normalize-report)]
+          (when client-id
+            (let [new-hwm (some-> data :summary :last_seen_id)]
+              (if (and new-hwm (not= new-hwm resolved-since))
+                (client-state/update-last-seen! db-conn client-id show-slug new-hwm)
+                (client-state/touch-accessed! db-conn client-id show-slug))))
           {:status 200
            :headers {"content-type" "application/json"}
            :body (json/generate-string data)})
@@ -93,9 +108,9 @@
                    [:input#since {:name "since" :type "text" :value default-since}]
                    [:input {:type "submit" :value "Get Boosts!"}]]
                   ;; Query results
-                  (let [show (re-pattern show-regex)
-                        since (Integer/parseInt since)
-                        report (reports/boost-report db-conn show since)]
+                  (let [show-pattern (re-pattern show-regex)
+                        since resolved-since
+                        report (reports/boost-report db-conn show-pattern since)]
                     [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
                      [:div {:style {"padding" "10px"}}
                       [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]
@@ -118,6 +133,35 @@
                         {:status 200
                          :headers {"content-type" "application/json"}
                          :body (json/generate-string {:shows (shows/show-options include-unknown)})}))}}]
+   ["/api/v1/client-states"
+    {:get {:handler (fn [_]
+                      {:status 200
+                       :headers {"content-type" "application/json"}
+                       :body (json/generate-string
+                              {:client-states
+                               (for [state (client-state/list-client-states db-conn)]
+                                 {:client (:client-state/client-id state)
+                                  :show (:client-state/show-slug state)
+                                  :last-seen-tx (:client-state/last-seen-tx state)
+                                  :last-accessed-tx (:client-state/last-accessed-tx state)})})})}
+     :delete {:handler (fn [{params :params}]
+                         (let [client (get params "client")
+                               show (get params "show")]
+                           (if (and client show)
+                             (do
+                               (client-state/delete-client-state! db-conn client show)
+                               {:status 200
+                                :headers {"content-type" "application/json"}
+                                :body (json/generate-string {:deleted true})})
+                             {:status 400
+                              :headers {"content-type" "application/json"}
+                              :body (json/generate-string {:error "client and show params required"})})))}}]
+   ["/api/v1/client-states/cleanup"
+    {:post {:handler (fn [_]
+                       (let [deleted (client-state/cleanup-old-states! db-conn 90)]
+                         {:status 200
+                          :headers {"content-type" "application/json"}
+                          :body (json/generate-string {:deleted deleted})}))}}]
    ["/boosts" {:get {:handler (get-boosts db-conn)}}]])
 
 (defn http-handler [db-conn]
