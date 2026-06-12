@@ -39,10 +39,27 @@
    :client-state/last-seen-tx {:db/valueType :db.type/long}
    :client-state/last-accessed-tx {:db/valueType :db.type/long}
    ;;
-   ;; :table/column {:db/valueType :db.type/...}
-   })
+   ;; New boost source fields
+   :boostagram/payment_rail {:db/valueType :db.type/string}
+   :boostagram/zaprite_order_id {:db/valueType :db.type/string
+                                 :db/unique :db.unique/identity}
+   :boostagram/r2_object_key {:db/valueType :db.type/string
+                              :db/unique :db.unique/identity}
+   :boostagram/memberful_member_id {:db/valueType :db.type/string}
+   :boostagram/amount_fiat_cents {:db/valueType :db.type/long}
+   :boostagram/amount_fiat_currency {:db/valueType :db.type/string}
+   :boostagram/received_at {:db/valueType :db.type/instant}
+   :boostagram/podcast_slug {:db/valueType :db.type/string}
+   :boostagram/episode_guid {:db/valueType :db.type/string}
 
-(defn remove-nil-vals [m]
+   :boostagram/type {:db/valueType :db.type/keyword}
+   :boostagram/boost_id {:db/valueType :db.type/string}
+   ;; Sync cursor tracking
+   :sync-cursor/key {:db/valueType :db.type/string
+                     :db/unique :db.unique/identity}
+   :sync-cursor/value {:db/valueType :db.type/string}})
+
+(defn remove-empty-vals [m]
   (->> m
        (remove
         (fn [[_ v]]
@@ -94,7 +111,7 @@
           (.decode rawboost)
           (#(java.lang.String. %))
           json/parse-string
-          remove-nil-vals
+          remove-empty-vals
           (#(namespace-invoice-keys :boostagram %))
           (#(flatten-paths "/" %))))
     (catch Exception e (println "EXCEPTION DECODING BOOST: " rawboost debug (bean e)) {})))
@@ -210,10 +227,12 @@
                   (assoc
                    invoice
                    :boostagram/value_sat_total
-                   (/ msats 1000))
+                   (quot msats 1000))
                   invoice)
         ;; Add attempt at content-derived ID
-        invoice (assoc invoice :boostagram/content_id (content-id invoice))]
+        invoice (assoc invoice :boostagram/content_id (content-id invoice))
+        ;; Classify as sat-based (all LND/Alby invoices)
+        invoice (assoc invoice :boostagram/type :sat)]
     invoice))
 
 (defn process-batch [batch]
@@ -221,10 +240,23 @@
         (comp (map #(dissoc % :features :amp_invoice_state :metadata :custom_records))
               (map #(namespace-invoice-keys :invoice %1))
               (map #(flatten-paths "/" %1))
-              (map remove-nil-vals)
+              (map remove-empty-vals)
               (map coerce-invoice-vals))
         #_(map #(into (sorted-map) %))
         batch))
+
+(defn backfill-boost-type! [conn]
+  (let [db (d/db conn)
+        eids (d/q '[:find [?e ...]
+                    :where
+                    [?e :boostagram/action _]
+                    (not [?e :boostagram/type _])]
+                  db)
+        txdata (mapv (fn [eid] {:db/id eid :boostagram/type :sat}) eids)]
+    (when (seq txdata)
+      (println "Backfilling :boostagram/type for" (count txdata) "entities")
+      (d/transact! conn txdata)
+      (println "Backfill complete."))))
 
 (defn add-boosts [conn source-name boosts]
   (->> boosts

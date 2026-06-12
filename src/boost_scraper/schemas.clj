@@ -1,6 +1,5 @@
 (ns boost-scraper.schemas
-  (:require [malli.core :as m]
-            [malli.util :as mu]))
+  (:require [malli.util :as mu]))
 
 (def ClientState
   [:map
@@ -24,7 +23,13 @@
    [:boostagram/action :string]
    [:boostagram/message {:optional true} :string]
    [:boostagram/value_sat_total :long]
-   [:scraper/source {:optional true} :string]])
+   [:scraper/source {:optional true} :string]
+   [:boostagram/payment_rail {:optional true} :string]
+   [:boostagram/amount_fiat_cents {:optional true} :long]
+   [:boostagram/amount_fiat_currency {:optional true} :string]
+   [:boostagram/received_at {:optional true} inst?]
+   [:boostagram/podcast_slug {:optional true} :string]
+   [:boostagram/episode_guid {:optional true} :string]])
 
 (defn as-optional [schema]
   (mu/optional-keys schema))
