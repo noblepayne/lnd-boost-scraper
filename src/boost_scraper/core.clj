@@ -238,7 +238,7 @@
                                    (d/close lnd-conn)
                                    (d/close nodecan-conn)
                                    (d/close alby-conn)))
-           _ (.addShutdownHook runtime shutdown-hook)]
+          _ (.addShutdownHook runtime shutdown-hook)]
       ;; Backfill boost type for legacy entities
       (db/backfill-boost-type! nodecan-conn)
       (if zaprite-api-key
@@ -272,11 +272,11 @@
                                           ["R2"      300000 r2-fut]]]
               (when f
                 (try
-                  (let [result (deref f timeout-ms nil)]
-                    (when (nil? result)
+                  (let [result (deref f timeout-ms ::timeout)]
+                    (when (= result ::timeout)
                       (println label "scrape timed out (" (/ timeout-ms 1000) "s)")))
-                 (catch Exception e
-                   (println label "scrape error:" (.getMessage e)))))))
+                  (catch Exception e
+                    (println label "scrape error:" (.getMessage e)))))))
           ;; Sync missing boosts (after LND/Alby scrapers complete)
           (try
             (println "Syncing missing boosts...")
