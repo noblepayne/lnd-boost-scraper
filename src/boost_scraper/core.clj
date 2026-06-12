@@ -7,6 +7,8 @@
             [boost-scraper.upstream :as upstream]
             [boost-scraper.upstream.alby :as alby]
             [boost-scraper.upstream.lnd :as lnd]
+            [boost-scraper.upstream.r2 :as r2]
+            [boost-scraper.upstream.zaprite :as zaprite]
             [boost-scraper.utils :as utils]
             [boost-scraper.web :as web]
             [clojure.string :as str]
@@ -75,7 +77,7 @@
                :where
                [?e :boostagram/content_id ?cid]]
              (d/db src-conn) src-boost-cids)
-        entities (map #(dissoc % :db/id) entities)]
+        entities (map #(db/remove-empty-vals (dissoc % :db/id)) entities)]
     (d/transact! dest-conn entities)))
 
 (def max-allowed-time-for-boost
@@ -136,10 +138,11 @@
           (let [filtered-batch (filter :creation_date boost-batch)
                 creation_dates (map (comp #(if (int? %) % (Integer/parseInt %))
                                           :creation_date)
-                                    filtered-batch)
-                first_creation_date (apply max creation_dates)]
-            ;; TODO: tests; <= or <?
-            (<= epoch first_creation_date))))))
+                                    filtered-batch)]
+            (if (seq creation_dates)
+              (<= epoch (apply max creation_dates))
+              (do (println "WARNING: get-all-boosts-until-epoch batch has no records with creation_date — iteration will stop. Batch count:" (count boost-batch))
+                  nil)))))))
 
 (def AUTOSCRAPE_START (->epoch #inst "2023-12-31T23:59Z"))
 #_(def AUTOSCRAPE_START (->epoch #inst "2024-09-01T00:00Z"))
@@ -155,7 +158,7 @@
                (d/db conn))
           [AUTOSCRAPE_START])]
     (println "alby most-recent-timestamp: " most-recent-timestamp)
-    (->> (get-all-boosts-until-epoch (alby/->Scraper) token most-recent-timestamp :wait wait)
+    (->> (get-all-boosts-until-epoch (alby/->Scraper) token most-recent-timestamp :wait wait :since most-recent-timestamp)
          (db/add-boosts conn "alby"))))
 
 (defn scrape-lnd-boosts-until-epoch [conn macaroon epoch wait]
@@ -209,7 +212,14 @@
 (defn -main [& _]
   ;; TODO: proper startup validation
   (let [env (System/getenv)
-        {:strs [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH ALBY_DBI JBNODE_DBI NODECAN_DBI]} env]
+        {:strs [JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH ALBY_DBI JBNODE_DBI NODECAN_DBI
+                ZAPRITE_API_KEY_PATH R2_ACCESS_KEY_ID_PATH R2_SECRET_ACCESS_KEY_PATH
+                R2_ACCOUNT_ID R2_BOOST_BUCKET]} env
+        zaprite-api-key (some-> ZAPRITE_API_KEY_PATH not-empty slurp str/trim not-empty)
+        r2-access-key (some-> R2_ACCESS_KEY_ID_PATH not-empty slurp str/trim not-empty)
+        r2-secret-key (some-> R2_SECRET_ACCESS_KEY_PATH not-empty slurp str/trim not-empty)
+        r2-account-id (not-empty R2_ACCOUNT_ID)
+        r2-bucket (not-empty R2_BOOST_BUCKET)]
     (when (not (and JBNODE_MACAROON_PATH NODECAN_MACAROON_PATH ALBY_TOKEN_PATH ALBY_DBI JBNODE_DBI NODECAN_DBI))
       (println "Missing required credentials!" {:jbnode JBNODE_MACAROON_PATH :nodecan NODECAN_MACAROON_PATH :alby ALBY_TOKEN_PATH})
       (System/exit 1))
@@ -217,7 +227,7 @@
           alby-conn (d/get-conn ALBY_DBI db/schema)
           nodecan-conn (d/get-conn NODECAN_DBI db/schema)
           lnd-macaroon (lnd/read-macaroon JBNODE_MACAROON_PATH)
-          nodecan-macaroon (lnd/read-macaroon  NODECAN_MACAROON_PATH)
+          nodecan-macaroon (lnd/read-macaroon NODECAN_MACAROON_PATH)
           alby-token (alby/load-key ALBY_TOKEN_PATH)
           runtime (Runtime/getRuntime)
           webserver (web/serve nodecan-conn)
@@ -228,24 +238,55 @@
                                    (d/close lnd-conn)
                                    (d/close nodecan-conn)
                                    (d/close alby-conn)))
-          _ (.addShutdownHook runtime shutdown-hook)]
+           _ (.addShutdownHook runtime shutdown-hook)]
+      ;; Backfill boost type for legacy entities
+      (db/backfill-boost-type! nodecan-conn)
+      (if zaprite-api-key
+        (println "Zaprite scraping enabled")
+        (println "Zaprite scraping disabled (set ZAPRITE_API_KEY_PATH)"))
+      (if (and r2-account-id r2-access-key r2-secret-key r2-bucket)
+        (println "R2 member-boost scraping enabled")
+        (println "R2 member-boost scraping disabled (set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID_PATH, R2_SECRET_ACCESS_KEY_PATH, R2_BOOST_BUCKET)"))
       (while true
         (try
           (println "Starting Scrape Cycle...")
-          ;; Run in parallel and wait for all to complete.
-          (println "Scraping in parallel...")
-          (run! deref [(utils/apply-virtual autoscrape-alby alby-conn alby-token 3000)
-                       (utils/apply-virtual autoscrape-lnd lnd-conn lnd-macaroon 500)
-                       (utils/apply-virtual autoscrape-nodecan nodecan-conn nodecan-macaroon 500)])
-          (println "Scrape phase complete.")
-          (println)
-          (println "Syncing missing boosts")
-          (println "Syncing JB")
-          (sync-mising-boosts! nodecan-conn lnd-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
-          (println "Syncing alby")
-          (sync-mising-boosts! nodecan-conn alby-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
-          (println "Finished syncing missing boosts")
-          (println)
+          ;; Launch all scraper groups concurrently.
+          (let [alby-fut    (utils/apply-virtual autoscrape-alby alby-conn alby-token 3000)
+                lnd-fut     (utils/apply-virtual autoscrape-lnd lnd-conn lnd-macaroon 500)
+                nodecan-fut (utils/apply-virtual autoscrape-nodecan nodecan-conn nodecan-macaroon 500)
+                zaprite-fut (when zaprite-api-key
+                              (utils/apply-virtual
+                               (fn [] (zaprite/sync-zaprite-boosts! nodecan-conn zaprite-api-key))))
+                r2-fut      (when (and r2-account-id r2-access-key r2-secret-key r2-bucket)
+                              (utils/apply-virtual
+                               (fn [] (r2/sync-r2-boosts! nodecan-conn
+                                                          {:account-id r2-account-id
+                                                           :access-key r2-access-key
+                                                           :secret-key r2-secret-key
+                                                           :bucket r2-bucket}))))]
+            ;; Wait for all scrapers, logging individual errors.
+            (doseq [[label timeout-ms f] [["Alby"    600000 alby-fut]
+                                          ["JB"      600000 lnd-fut]
+                                          ["Nodecan" 600000 nodecan-fut]
+                                          ["Zaprite" 300000 zaprite-fut]
+                                          ["R2"      300000 r2-fut]]]
+              (when f
+                (try
+                  (let [result (deref f timeout-ms nil)]
+                    (when (nil? result)
+                      (println label "scrape timed out (" (/ timeout-ms 1000) "s)")))
+                 (catch Exception e
+                   (println label "scrape error:" (.getMessage e)))))))
+          ;; Sync missing boosts (after LND/Alby scrapers complete)
+          (try
+            (println "Syncing missing boosts...")
+            (println "Syncing JB")
+            (sync-mising-boosts! nodecan-conn lnd-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
+            (println "Syncing alby")
+            (sync-mising-boosts! nodecan-conn alby-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
+            (println "Finished syncing missing boosts")
+            (catch Exception e
+              (println "Sync error:" (.getMessage e))))
           (println "Scrape Cycle finished, sleeping.")
           (Thread/sleep scrape-sleep-interval)
           (catch Exception e (println "ERROR WHILE SCRAPING! " (bean e))))))))
@@ -315,7 +356,7 @@
        (sort-by :invoice/creation_date)
        (spit "/tmp/after_sync"))
 
-  (->> #_(->epoch #inst "2024-08-05T06:00")   1724611594
+  (->> #_(->epoch #inst "2024-08-05T06:00") 1724611594
        (boost-scraper.reports/boost-report lnd-conn #"(?i).*unplugged.*")
        #_(into [] cat)
        #_(sort-by :invoice/creation_date)
