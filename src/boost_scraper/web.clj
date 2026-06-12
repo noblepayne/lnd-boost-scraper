@@ -5,7 +5,10 @@
             [boost-scraper.reports :as reports]
             [boost-scraper.shows :as shows]
             [boost-scraper.client-state :as client-state]
+            [boost-scraper.analysis :as analysis]
+            [boost-scraper.query-proxy :as qp]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.math :as math]
             [clojure.string :as str]
@@ -18,6 +21,12 @@
             [reitit.ring.middleware.muuntaja :as muuntaja]))
 
 ;; Routes
+
+(def query-templates
+  "Lazily loaded query templates from resources."
+  (delay
+    (when-let [resource (io/resource "query_templates.edn")]
+      (edn/read-string (slurp resource)))))
 (defn two-weeks-ago []
   (let [now (/ (System/currentTimeMillis) 1000)
         two-weeks-ago (- now (* 2 60 60 24 7))]
@@ -164,6 +173,118 @@
                          {:status 200
                           :headers {"content-type" "application/json"}
                           :body (json/generate-string {:deleted deleted})}))}}]
+   ;; Analysis endpoints
+   ["/api/v1/analysis/top-boosters"
+    {:get {:handler (fn [request]
+                      (let [{{:strs [show start end limit type]} :params} request
+                            show-regex (when show (re-pattern (or (shows/regex-for show) show)))
+                            start (when start (Long/parseLong start))
+                            end (when end (Long/parseLong end))
+                            limit (when limit (Integer/parseInt limit))
+                            boost-type (when type (keyword type))]
+                        (if-not show-regex
+                          {:status 400
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (str "Invalid show: " show)})}
+                          (try
+                            (let [results (analysis/top-boosters db-conn show-regex start end limit boost-type)]
+                              {:status 200
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:boosters results})})
+                            (catch Exception e
+                              {:status 500
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:error (.getMessage e)})})))))}}]
+   ["/api/v1/analysis/monday-summary"
+    {:get {:handler (fn [request]
+                      (let [{{:strs [show type]} :params} request
+                            show-regex (when show (re-pattern (or (shows/regex-for show) show)))
+                            boost-type (when type (keyword type))]
+                        (if-not show-regex
+                          {:status 400
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (str "Invalid show: " show)})}
+                          (try
+                            (let [results (analysis/monday-boost-summary db-conn show-regex boost-type)]
+                              {:status 200
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string results)})
+                            (catch Exception e
+                              {:status 500
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:error (.getMessage e)})})))))}}]
+   ["/api/v1/analysis/monthly-leaderboard"
+    {:get {:handler (fn [request]
+                      (let [{{:strs [show type]} :params} request
+                            show-regex (when show (re-pattern (or (shows/regex-for show) show)))
+                            boost-type (when type (keyword type))]
+                        (if-not show-regex
+                          {:status 400
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (str "Invalid show: " show)})}
+                          (try
+                            (let [results (analysis/top-booster-per-month db-conn show-regex boost-type)]
+                              {:status 200
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string results)})
+                            (catch Exception e
+                              {:status 500
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:error (.getMessage e)})})))))}}]
+   ["/api/v1/analysis/app-percentages"
+    {:get {:handler (fn [_]
+                      (try
+                        (let [results (analysis/app-percentages db-conn)]
+                          {:status 200
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:apps results})})
+                        (catch Exception e
+                          {:status 500
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (.getMessage e)})})))}}]
+   ;; Query proxy endpoint
+   ["/api/v1/query"
+    {:post {:handler (fn [request]
+                       (let [body (:body-params request)
+                             query-str (:query body)
+                             params (:params body)
+                             timeout (:timeout body)
+                             limit (:limit body)]
+                         (if-not query-str
+                           {:status 400
+                            :headers {"content-type" "application/json"}
+                            :body (json/generate-string {:error "Missing required field: query"})}
+                           (let [result (qp/execute-query db-conn query-str
+                                                          (cond-> {}
+                                                            params (assoc :params params)
+                                                            timeout (assoc :timeout timeout)
+                                                            limit (assoc :limit limit)))]
+                             {:status (if (= :ok (:status result)) 200 400)
+                              :headers {"content-type" "application/json"}
+                              :body (json/generate-string result)}))))}}]
+   ;; Query templates
+   ["/api/v1/query/templates"
+    {:get {:handler (fn [_]
+                      (let [templates @query-templates]
+                        {:status 200
+                         :headers {"content-type" "application/json"}
+                         :body (json/generate-string
+                                {:templates (mapv (fn [t]
+                                                    {:name (:name t)
+                                                     :description (:description t)})
+                                                  (:templates templates))})}))}}]
+   ["/api/v1/query/templates/:name"
+    {:get {:handler (fn [request]
+                      (let [name (get-in request [:path-params :name])
+                            templates @query-templates
+                            template (first (filter #(= (:name %) name) (:templates templates)))]
+                        (if template
+                          {:status 200
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:template template})}
+                          {:status 404
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (str "Template not found: " name)})})))}}]
    ["/boosts" {:get {:handler (get-boosts db-conn)}}]])
 
 (defn http-handler [db-conn]
