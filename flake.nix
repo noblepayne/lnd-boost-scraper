@@ -119,6 +119,31 @@
         };
       })
       nixpkgs.legacyPackages;
+    checks =
+      builtins.mapAttrs (system: pkgs: let
+        eval = pkgs.lib.evalModules {
+          modules = [
+            ./module.nix
+            { services.lnd-boost-scraper.enable = false; }
+            { _module.check = false; }
+          ];
+          specialArgs = { inherit pkgs; };
+        };
+        opts = eval.options.services.lnd-boost-scraper;
+      in {
+        module-options = assert opts.zapriteApiKeyPath.type.name == "str";
+          assert opts.r2AccessKeyIdPath.type.name == "str";
+          assert opts.r2SecretAccessKeyPath.type.name == "str";
+          assert opts.r2AccountId.type.name == "str";
+          assert opts.r2BoostBucket.type.name == "str";
+          assert opts.zapriteApiKeyPath.default == "";
+          assert opts.r2AccessKeyIdPath.default == "";
+          assert opts.r2SecretAccessKeyPath.default == "";
+          assert opts.r2AccountId.default == "";
+          assert opts.r2BoostBucket.default == "";
+          pkgs.runCommand "check-module-options" {} "touch $out";
+      })
+      nixpkgs.legacyPackages;
     nixosModules = {
       default = {
         options,
