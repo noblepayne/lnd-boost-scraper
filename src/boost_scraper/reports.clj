@@ -1,6 +1,5 @@
 (ns boost-scraper.reports
   (:require [boost-scraper.utils :as utils]
-            [boost-scraper.schemas :as schemas]
             [clojure.instant]
             [clojure.string :as str]
             [clojure.pprint :as pprint]
@@ -13,6 +12,8 @@
    [:ballers {:default []} [:vector [:map {:closed false}]]]
    [:boosts {:default []} [:vector [:map {:closed false}]]]
    [:thanks {:default []} [:vector [:map {:closed false}]]]
+   [:fiat-boosts {:default []} [:vector [:map {:closed false}]]]
+   [:member-free-boosts {:default []} [:vector [:map {:closed false}]]]
    [:boost-summary
     [:map
      [:boost_total_sats {:default 0} :int]
@@ -52,7 +53,10 @@
                            :boostagram/episode
                            :boostagram/app_name
                            :boostagram/message
-                           :boostagram/ts])
+                           :boostagram/ts
+                           :boostagram/amount_fiat_cents
+                           :boostagram/amount_fiat_currency
+                           :boostagram/payment_rail])
          :in $ ?regex' ?last-seen-timestamp'
          :where
          [?e :invoice/creation_date ?creation_date]
@@ -69,7 +73,7 @@
        (d/db conn) show-regex last-seen-timestamp))
 
 (defn get-boost-summary-for-report [conn show-regex last-seen-timestamp]
-  (d/q '[:find [?ballers ?boosts ?thanks ?summary ?stream_summary ?total_summary ?last_seen_id]
+  (d/q '[:find [?ballers ?boosts ?thanks ?fiat_by_sender ?member_free_by_sender ?summary ?stream_summary ?total_summary ?last_seen_id ?source_sat ?source_fiat ?source_member]
          :in $ ?regex ?last-seen-timestamp
          :where
          ;; find all invoices since last-seen for show-regex
@@ -114,6 +118,12 @@
                 [(re-matches ?regex' ?episode) _])]
            $ ?regex ?last-seen-timestamp)
           ?valid_eids]
+         ;; NOTE: ?valid_eids intentionally includes fiat and member-free
+         ;; entities — no [:boostagram/type :sat] filter here. This means
+         ;; ?last_seen_id (max creation_date) spans all boost types, which
+         ;; is correct: we want the cursor to advance past every processed
+         ;; entity regardless of type. The type-specific aggregation rules
+         ;; below filter by :sat / :fiat / :member-free respectively.
          ;; find max boost creation_date
          [(datalevin.core/q
            [:find [(max ?cd')]
@@ -139,12 +149,13 @@
             :in $ [[?e] ...]
             :where
             [?e :boostagram/action "boost"]
+            [?e :boostagram/type :sat]
             [?e :boostagram/sender_name_normalized ?sender_name_normalized]
             [?e :boostagram/value_sat_total ?sats]
             [?e :invoice/creation_date ?d]]
            $ ?valid_eids_before_maxcd)
           ?sats_by_eid]
-         ;; pull individual boost data for each sender
+          ;; pull individual boost data for each sender
          [(datalevin.core/q
            [:find ?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boosts
             :in $ [[?sender_name_normalized' ?sat_total' ?boost_count' ?first_boost' ?boost_ids] ...]
@@ -160,7 +171,10 @@
                                    :invoice/creation_date
                                    :invoice/identifier
                                    :boostagram/message
-                                   :scraper/source]) ...]
+                                   :scraper/source
+                                   :boostagram/amount_fiat_cents
+                                   :boostagram/amount_fiat_currency
+                                   :boostagram/payment_rail]) ...]
                :in $ [?e' ...]]
               $ ?boost_ids)
              ?boosts]]
@@ -191,14 +205,75 @@
             [(< ?sat_total' 2000)]]
            $ ?sats_by_eid_with_deets)
           ?thanks]
-         ;; boost summary
+          ;; fiat: aggregate cents by sender
+         [(datalevin.core/q
+           [:find ?sender (sum ?cents) (count ?e) (distinct ?e)
+            :in $ [[?e] ...]
+            :where
+            [?e :boostagram/type :fiat]
+            [?e :boostagram/sender_name_normalized ?sender]
+            [?e :boostagram/amount_fiat_cents ?cents]]
+           $ ?valid_eids_before_maxcd)
+          ?fiat_raw]
+          ;; fiat: pull boost details per sender
+         [(datalevin.core/q
+           [:find ?sender' ?cent_total' ?boost_count' ?boosts
+            :in $ [[?sender' ?cent_total' ?boost_count' ?boost_ids] ...]
+            :where
+            [(datalevin.core/q
+              [:find [(d/pull ?e [:boostagram/sender_name_normalized
+                                  :boostagram/amount_fiat_cents
+                                  :boostagram/amount_fiat_currency
+                                  :boostagram/payment_rail
+                                  :boostagram/podcast
+                                  :boostagram/episode
+                                  :boostagram/message
+                                  :invoice/creation_date
+                                  :invoice/created_at
+                                  :scraper/source]) ...]
+               :in $ [?e ...]]
+              $ ?boost_ids)
+             ?boosts]]
+           $ ?fiat_raw)
+          ?fiat_by_sender]
+          ;; member-free: count by sender
+         [(datalevin.core/q
+           [:find ?sender (count ?e) (distinct ?e)
+            :in $ [[?e] ...]
+            :where
+            [?e :boostagram/type :member-free]
+            [?e :boostagram/sender_name_normalized ?sender]]
+           $ ?valid_eids_before_maxcd)
+          ?member_free_raw]
+          ;; member-free: pull boost details per sender
+         [(datalevin.core/q
+           [:find ?sender' ?boost_count' ?boosts
+            :in $ [[?sender' ?boost_count' ?boost_ids] ...]
+            :where
+            [(datalevin.core/q
+              [:find [(d/pull ?e [:boostagram/sender_name_normalized
+                                  :boostagram/payment_rail
+                                  :boostagram/memberful_member_id
+                                  :boostagram/podcast
+                                  :boostagram/episode
+                                  :boostagram/message
+                                  :invoice/creation_date
+                                  :invoice/created_at
+                                  :scraper/source]) ...]
+               :in $ [?e ...]]
+              $ ?boost_ids)
+             ?boosts]]
+           $ ?member_free_raw)
+          ?member_free_by_sender]
+          ;; boost summary (sat only)
          [(datalevin.core/q
            [:find (sum ?sats) (count ?e) (count-distinct ?sender)
             :in $ [[?e] ...]
             :where
-                ;; boost only
+                 ;; boost only
             [?e :boostagram/action "boost"]
-                ;; bind our vars to aggregate
+            [?e :boostagram/type :sat]
+                 ;; bind our vars to aggregate
             [?e :boostagram/value_sat_total ?sats]
             [?e :boostagram/sender_name_normalized ?sender]]
            $ ?valid_eids_before_maxcd)
@@ -230,26 +305,83 @@
            $ ?valid_eids_before_maxcd)
           ?total_summary']
          ;; handle empty results. having a nil here short circuits the whole query
-         [(or (first ?total_summary') [0 0 0]) ?total_summary]]
+         [(or (first ?total_summary') [0 0 0]) ?total_summary]
+         ;; source breakdown: sat boosts grouped by :scraper/source
+         [(datalevin.core/q
+           [:find ?source (sum ?sats) (count ?e)
+            :in $ [[?e] ...]
+            :where
+            [?e :boostagram/type :sat]
+            [?e :boostagram/value_sat_total ?sats]
+            [(get-else $ ?e :scraper/source "unknown") ?source]]
+           $ ?valid_eids_before_maxcd)
+          ?source_sat]
+         ;; source breakdown: fiat boosts grouped by :scraper/source
+         [(datalevin.core/q
+           [:find ?source (sum ?cents) (count ?e)
+            :in $ [[?e] ...]
+            :where
+            [?e :boostagram/type :fiat]
+            [?e :boostagram/amount_fiat_cents ?cents]
+            [(get-else $ ?e :scraper/source "unknown") ?source]]
+           $ ?valid_eids_before_maxcd)
+          ?source_fiat]
+         ;; source breakdown: member-free boosts grouped by :scraper/source
+         [(datalevin.core/q
+           [:find ?source (count ?e)
+            :in $ [[?e] ...]
+            :where
+            [?e :boostagram/type :member-free]
+            [(get-else $ ?e :scraper/source "unknown") ?source]]
+           $ ?valid_eids_before_maxcd)
+          ?source_member]]
        (d/db conn) show-regex last-seen-timestamp))
 
 (defn sort-report
-  [[ballers
-    boosts
-    thanks
+  [[ballers boosts thanks fiat-by-sender member-free-by-sender
     [boost_total_sats boost_total_boosts boost_total_boosters]
     [stream_total_sats stream_total_streams stream_total_streamers]
     [total_sats total_invoices total_unique_boosters]
-    last_seen_id]]
+    last_seen_id
+    source_sat source_fiat source_member]]
   (letfn [(sort-boosts [[sender total count mindate boosts]]
             {:sender sender
              :total total
              :count count
              :mindate mindate
-             :boosts (sort-by :invoice/created_at boosts)})]
+             :boosts (sort-by :invoice/created_at boosts)})
+          (sort-fiat [[sender total count boosts]]
+            {:sender sender
+             :total total
+             :count count
+             :boosts (sort-by :invoice/created_at boosts)})
+          (sort-free [[sender count boosts]]
+            {:sender sender
+             :count count
+             :boosts (sort-by :invoice/created_at boosts)})
+          (merge-source-breakdown [sat-results fiat-results member-results]
+            (let [sat-map (into {} (for [[src sats cnt] sat-results]
+                                     [src {:sats (or sats 0) :count (or cnt 0)}]))
+                  fi-map (into {} (for [[src cents cnt] fiat-results]
+                                    [src {:fiat-cents (or cents 0) :count (or cnt 0)}]))
+                  mem-map (into {} (for [[src cnt] member-results]
+                                     [src {:count (or cnt 0)}]))
+                  all-sources (distinct (concat (keys sat-map) (keys fi-map) (keys mem-map)))]
+              (into (sorted-map)
+                    (for [src all-sources
+                          :let [sat (get-in sat-map [src :sats] 0)
+                                sat-cnt (get-in sat-map [src :count] 0)
+                                fi-cents (get-in fi-map [src :fiat-cents] 0)
+                                fi-cnt (get-in fi-map [src :count] 0)
+                                mem-cnt (get-in mem-map [src :count] 0)]]
+                      [src {:count (+ sat-cnt fi-cnt mem-cnt)
+                            :sats sat
+                            :fiat-cents fi-cents}]))))]
     {:ballers (sort-by :total #(compare %2 %1) (map sort-boosts ballers))
      :boosts (sort-by :mindate (map sort-boosts boosts))
      :thanks (sort-by :mindate (map sort-boosts thanks))
+     :fiat-boosts (sort-by :total #(compare %2 %1) (map sort-fiat fiat-by-sender))
+     :member-free-boosts (sort-by :count #(compare %2 %1) (map sort-free member-free-by-sender))
      :boost-summary {:boost_total_sats (or boost_total_sats 0)
                      :boost_total_boosts (or boost_total_boosts 0)
                      :boost_total_boosters (or boost_total_boosters 0)}
@@ -259,9 +391,25 @@
      :summary {:total_sats (or total_sats 0)
                :total_invoices (or total_invoices 0)
                :last_seen_id last_seen_id
-               :total_unique_boosters (or total_unique_boosters 0)}}))
+               :total_unique_boosters (or total_unique_boosters 0)}
+     :source-breakdown (merge-source-breakdown source_sat source_fiat source_member)}))
 
 (defn int-comma [n] (clojure.pprint/cl-format nil "~:d" (or n 0)))
+
+(defn format-value-line
+  "Format a boost's value line.
+   Fiat: '$5.00 (card)'. Member-free: 'Free'. Sats: '5,000 sats'."
+  [b]
+  (cond
+    (and (:boostagram/amount_fiat_cents b)
+         (pos? (:boostagram/amount_fiat_cents b)))
+    (let [dollars (/ (:boostagram/amount_fiat_cents b) 100.0)
+          rail (or (:boostagram/payment_rail b) "unknown")]
+      (format "$%.2f (%s)" (double dollars) rail))
+    (= "member-free" (:boostagram/payment_rail b))
+    "Free Member Boost"
+    :else
+    (str (int-comma (:boostagram/value_sat_total b)) " sats")))
 
 (defn score-metadata
   "Score a boost by richness of metadata.
@@ -290,7 +438,6 @@
      "\n"
      (concat
       (let [{:keys [boostagram/message
-                    boostagram/value_sat_total
                     boostagram/podcast
                     boostagram/episode
                     boostagram/app_name
@@ -309,15 +456,21 @@
               (str "+ at " (if (string? display-ts) display-ts (utils/format-seconds display-ts)) "\n")))
           "\n"
           "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
-          "+ " (int-comma value_sat_total) " sats\n"
+          "+ " (format-value-line best) "\n"
           (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))])
       (for [{:keys [boostagram/message boostagram/value_sat_total
                     invoice/creation_date
-                    #_invoice/identifier]} others]
+                    #_invoice/identifier
+                    boostagram/amount_fiat_cents
+                    boostagram/amount_fiat_currency
+                    boostagram/payment_rail]} others]
         (str "\n"
              #_("+ " identifier "\n")
              "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
-             "+ " (int-comma value_sat_total) " sats\n"
+             "+ " (format-value-line {:boostagram/amount_fiat_cents amount_fiat_cents
+                                      :boostagram/amount_fiat_currency amount_fiat_currency
+                                      :boostagram/payment_rail payment_rail
+                                      :boostagram/value_sat_total value_sat_total}) "\n"
              (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :("))))))))))
 
 (defn format-boost-batch [{:keys [sender total count boosts]}]
@@ -327,17 +480,44 @@
        (format-boost-batch-details boosts)
        "\n"))
 
+(defn format-fiat-boost-batch [{:keys [sender total count boosts]}]
+  (str "### From: " sender "\n"
+       "+ " (format "%.2f" (float (/ (or total 0) 100))) " total fiat\n"
+       "+ " (int-comma count) " boost(s)\n"
+       (format-boost-batch-details boosts)
+       "\n"))
+
+(defn format-member-free-boost-batch [{:keys [sender count boosts]}]
+  (str "### From: " sender "\n"
+       "+ " (int-comma count) " free member boost(s)\n"
+       (format-boost-batch-details boosts)
+       "\n"))
+
 (defn format-boost-section [boosts]
   (str/join "\n" (map format-boost-batch boosts)))
 
+(defn format-fiat-section [boosts]
+  (str/join "\n" (map format-fiat-boost-batch boosts)))
+
+(defn format-member-free-section [boosts]
+  (str/join "\n" (map format-member-free-boost-batch boosts)))
+
 (defn format-sorted-report
-  [{:keys [ballers boosts thanks boost-summary stream-summary summary]}]
+  [{:keys [ballers boosts thanks fiat-boosts member-free-boosts
+           boost-summary stream-summary summary fiat-converted fiat-skipped
+           source-breakdown]}]
   (str "## Baller Boosts\n"
        (format-boost-section ballers) "\n"
        "## Boosts\n"
        (format-boost-section boosts) "\n"
        "## Thanks\n"
        (format-boost-section thanks)
+       (when (seq fiat-boosts)
+         (str "\n## Fiat Boosts\n"
+              (format-fiat-section fiat-boosts)))
+       (when (seq member-free-boosts)
+         (str "\n## Member Free Boosts\n"
+              (format-member-free-section member-free-boosts)))
        "\n## Boost Summary"
        "\n+ Total Boosted Sats: " (int-comma (:boost_total_sats boost-summary))
        "\n+ Total Boosts: " (int-comma (:boost_total_boosts boost-summary))
@@ -350,61 +530,105 @@
        "\n"
        "\n## Summary"
        "\n+ Total Sats: " (int-comma (:total_sats summary))
+       (cond
+         fiat-converted
+         (str " (incl. " (int-comma (:fiat-sats fiat-converted))
+              " fiat @" (int-comma (:rate fiat-converted)) " sats/USD"
+              ", via " (:source fiat-converted) ")")
+         fiat-skipped
+         " (rate unavailable — fiat excluded)")
        "\n+ Total Invoices: " (int-comma (:total_invoices summary))
        "\n+ Total Unique Senders: " (int-comma (:total_unique_boosters summary))
+       (let [fiat-count (apply + (map :count fiat-boosts))
+             fiat-senders (count fiat-boosts)
+             free-count (apply + (map :count member-free-boosts))
+             free-senders (count member-free-boosts)]
+         (str
+          (when (pos? fiat-count)
+            (str "\n+ Total Fiat Boosts: " (int-comma fiat-count)
+                 " (" (int-comma fiat-senders) " booster"
+                 (when (not= 1 fiat-senders) "s") ")"))
+          (when (pos? free-count)
+            (str "\n+ Total Member Free Boosts: " (int-comma free-count)
+                 " (" (int-comma free-senders) " member"
+                 (when (not= 1 free-senders) "s") ")"))))
+       (when (seq source-breakdown)
+         (str "\n\n## Source Breakdown\n"
+              (str/join "\n"
+                        (for [[src {:keys [count sats fiat-cents]}] (reverse (sort-by (fn [[_ v]] (:count v)) source-breakdown))]
+                          (str "+ " src ": " (int-comma count) " boost"
+                               (when (not= 1 count) "s")
+                               " — " (int-comma sats) " sats"
+                               (when (pos? fiat-cents)
+                                 (str ", $" (format "%.2f" (/ fiat-cents 100.0)) " fiat")))))))
        "\n"
        "\n## Last Seen"
        "\n+ Last seen ID: " (:last_seen_id summary)
        "\n"))
 
-(defn boost-report [conn show-regex last-seen-id]
+(defn add-fiat-to-total
+  "Convert fiat boost totals to sats and add to summary total.
+   fiat-sats-rate = {:rate N :source NAME} where rate is sats per 1 USD,
+   nil if no feed configured, or a map with nil rate if feed failed."
+  [report fiat-sats-rate]
+  (let [rate (:rate fiat-sats-rate)]
+    (cond
+      (and rate (seq (:fiat-boosts report)))
+      (let [fiat-cents (apply + (map :total (:fiat-boosts report)))
+            fiat-sats (int (/ (* fiat-cents (long rate)) 100))]
+        (-> report
+            (assoc :fiat-converted {:fiat-cents fiat-cents
+                                    :fiat-sats fiat-sats
+                                    :rate rate
+                                    :source (:source fiat-sats-rate)})
+            (update-in [:summary :total_sats] + fiat-sats)))
+      (and (map? fiat-sats-rate) (nil? rate) (seq (:fiat-boosts report)))
+      (assoc report :fiat-skipped true)
+      :else report)))
+
+(defn boost-report [conn show-regex last-seen-id & {:keys [fiat-sats-rate]}]
   (->> (get-boost-summary-for-report conn show-regex last-seen-id)
        sort-report
        normalize-report
+       (#(add-fiat-to-total % fiat-sats-rate))
        format-sorted-report))
 
 (defn first-booster [conn episode]
-  (d/q '[:find [(d/pull ?entity [:boostagram/sender_name ;; what fields we want to see on the entity
-                                 :invoice/created_at
-                                 :boostagram/app_name
-                                 :boostagram/value_sat_total])]
-         :in $ ?episode
-       ;; find entity id for first stream that matches our filters
-         :where [(d/q [:find [(min ?timestamp) ?entity]
-                       :where
-                     ;; find only streams
-                       [?entity :boostagram/action "stream"]
-                     ;; for a particular episode
-                       [?entity :boostagram/episode ?episode]
-                     ;; bind creation_date to ?timestamp
-                       [?entity :invoice/creation_date ?timestamp]]
-                      $)
-                 [_ ?entity]]]
-       (d/db conn)
-       episode))
+  (let [db (d/db conn)
+        [min-ts]
+        (d/q '[:find [(min ?timestamp)]
+               :in $ ?episode
+               :where
+               [?e :boostagram/action "stream"]
+               [?e :boostagram/episode ?episode]
+               [?e :invoice/creation_date ?timestamp]]
+             db episode)]
+    (when min-ts
+      (first
+       (d/q '[:find [(pull ?e [:boostagram/sender_name
+                               :invoice/created_at
+                               :boostagram/app_name
+                               :boostagram/value_sat_total])]
+              :in $ ?episode ?min-ts
+              :where
+              [?e :boostagram/action "stream"]
+              [?e :boostagram/episode ?episode]
+              [?e :invoice/creation_date ?min-ts]]
+            db episode min-ts)))))
 
 (defn podcast-app-percentages [conn]
-  (d/q '[:find ?app ?prcnt
-         :in $
-         :order-by [?prcnt :desc]
-         :where
-         [(datalevin.core/q [:find ?app (count ?e)
-                             :in $
-                             :where
-                             [?e :boostagram/action "boost"]
-                             [(get-else $ ?e :boostagram/app_name "unknown_app") ?app]]
-                            $)
-          ?appcnts]
-         [(datalevin.core/q [:find [(sum ?cnt)]
-                             :in [[_ ?cnt]]]
-                            ?appcnts)
-          [?total]]
-         [(datalevin.core/q [:find ?app ?prcnt
-                             :in ?total [[?app ?cnt] ...]
-                             :where
-                             [(/ ?cnt ?total) ?prcnt']
-                             [(* 100.0 ?prcnt') ?prcnt'']
-                             [(clojure.math/round ?prcnt'') ?prcnt]]
-                            ?total ?appcnts)
-          [[?app ?prcnt] ...]]]
-       (d/db conn)))
+  (let [db (d/db conn)
+        ;; Query all boosts with their app_name (get-else for missing)
+        app-counts (d/q '[:find ?app (count ?e)
+                          :in $
+                          :where
+                          [?e :boostagram/action "boost"]
+                          [(get-else $ ?e :boostagram/app_name "unknown_app") ?app]]
+                        db)
+        total (apply + (map second app-counts))]
+    (if (pos? total)
+      (sort-by second #(compare %2 %1)
+               (map (fn [[app cnt]]
+                      [app (long (Math/round (* (/ cnt total) 100.0)))])
+                    app-counts))
+      [])))
