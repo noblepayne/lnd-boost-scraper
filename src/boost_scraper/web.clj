@@ -1,6 +1,7 @@
 (ns boost-scraper.web
   (:require [aleph.http :as http]
             [babashka.http-client :as httpc]
+            [boost-scraper.price-feed :as price-feed]
             [boost-scraper.reports :as reports]
             [boost-scraper.shows :as shows]
             [boost-scraper.client-state :as client-state]
@@ -110,7 +111,8 @@
                   ;; Query results
                   (let [show-pattern (re-pattern show-regex)
                         since resolved-since
-                        report (reports/boost-report db-conn show-pattern since)]
+                        report (reports/boost-report db-conn show-pattern since
+                                                     :fiat-sats-rate (price-feed/fiat-sats-rate))]
                     [:div#boosts {:style {:margin-top "10px" :margin-bottom "10px"}}
                      [:div {:style {"padding" "10px"}}
                       [:button#copyMarkdown {:onClick "copyMarkdown()"} "Copy Markdown"]
