@@ -1,0 +1,130 @@
+{:templates
+ [{:name "top-boosters"
+   :description "Top N boosters by aggregate value (sats, fiat cents, or count)"
+   :params [{:name "show"
+             :type :string
+             :description "Show slug (e.g. \"lup\", \"twib\") or regex pattern"
+             :required true}
+            {:name "start"
+             :type :long
+             :description "Start of time range (epoch seconds)"
+             :required false}
+            {:name "end"
+             :type :long
+             :description "End of time range (epoch seconds)"
+             :required false}
+            {:name "limit"
+             :type :long
+             :description "Max results (default 10)"
+             :default 10}
+            {:name "type"
+             :type :keyword
+             :description "Boost type filter: :sat, :fiat, :member-free, or nil for all"
+             :required false}]
+   :query {:find [?sender (sum ?amount)]
+           :with [?e]
+           :in [$ ?regex ?start ?end ?boost-type]
+           :where [[?e :boostagram/action "boost"]
+                   [?e :boostagram/podcast ?podcast]
+                   [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                   (or [(re-matches ?regex ?podcast) _]
+                       [(re-matches ?regex ?episode) _])
+                   [?e :invoice/creation_date ?cd]
+                   [(<= ?start ?cd ?end)]
+                   [?e :boostagram/value_sat_total ?sats]
+                   [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
+                   [(get-else $ ?e :boostagram/type :sat) ?boost-type]]}}
+
+  {:name "boost-counts-by-dow"
+   :description "Boost engagement by day of week (all types)"
+   :params [{:name "show"
+             :type :string
+             :description "Show slug or regex pattern"
+             :required true}
+            {:name "type"
+             :type :keyword
+             :description "Boost type filter: :sat, :fiat, :member-free, or nil for all"
+             :required false}]
+   :query {:find [(count ?e) .]
+           :in [$ ?regex ?boost-type]
+           :where [[?e :boostagram/action "boost"]
+                   [?e :boostagram/podcast ?podcast]
+                   [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                   (or [(re-matches ?regex ?podcast) _]
+                       [(re-matches ?regex ?episode) _])
+                   [?e :boostagram/value_sat_total ?sats]
+                   [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
+                   [(get-else $ ?e :boostagram/type :sat) ?boost-type]]}}
+
+  {:name "fiat-breakdown-by-source"
+   :description "Per-source fiat breakdown (boostagram amount, USD value, sats equivalent)"
+   :params [{:name "show"
+             :type :string
+             :description "Show slug or regex pattern"
+             :required true}
+            {:name "start"
+             :type :long
+             :description "Start of time range (epoch seconds)"
+             :required false}
+            {:name "end"
+             :type :long
+             :description "End of time range (epoch seconds)"
+             :required false}]
+   :query {:find [?source (sum ?cents) (sum ?usd) (sum ?sats)]
+           :with [?e]
+           :in [$ ?regex ?start ?end]
+           :where [[?e :boostagram/action "boost"]
+                   [?e :boostagram/podcast ?podcast]
+                   [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                   (or [(re-matches ?regex ?podcast) _]
+                       [(re-matches ?regex ?episode) _])
+                   [?e :boostagram/type :fiat]
+                   [?e :boostagram/amount_fiat_cents ?cents]
+                   [?e :boostagram/fiat_value ?usd]
+                   [?e :boostagram/value_sat_total ?sats]
+                   [?e :scraper/source ?source]
+                   [?e :invoice/creation_date ?cd]
+                   [(<= ?start ?cd ?end)]]}}
+
+  {:name "monday-summary"
+   :description "Monday engagement summary (boost count, unique senders, per-day counts)"
+   :params [{:name "show"
+             :type :string
+             :description "Show slug or regex pattern"
+             :required true}
+            {:name "type"
+             :type :keyword
+             :description "Boost type filter: :sat, :fiat, :member-free, or nil for all"
+             :required false}]
+   :query {:find [(count ?e) (count-distinct ?sender) .]
+           :in [$ ?regex ?boost-type]
+           :where [[?e :boostagram/action "boost"]
+                   [?e :boostagram/podcast ?podcast]
+                   [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                   (or [(re-matches ?regex ?podcast) _]
+                       [(re-matches ?regex ?episode) _])
+                   [?e :boostagram/value_sat_total ?sats]
+                   [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
+                   [(get-else $ ?e :boostagram/type :sat) ?boost-type]]}}
+
+  {:name "monthly-leaderboard"
+   :description "Per-month leaderboard (month, sender, aggregate value)"
+   :params [{:name "show"
+             :type :string
+             :description "Show slug or regex pattern"
+             :required true}
+            {:name "type"
+             :type :keyword
+             :description "Boost type filter: :sat, :fiat, :member-free, or nil for all"
+             :required false}]
+   :query {:find [?month ?sender (sum ?amount)]
+           :with [?e]
+           :in [$ ?regex ?boost-type]
+           :where [[?e :boostagram/action "boost"]
+                   [?e :boostagram/podcast ?podcast]
+                   [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                   (or [(re-matches ?regex ?podcast) _]
+                       [(re-matches ?regex ?episode) _])
+                   [?e :boostagram/value_sat_total ?sats]
+                   [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
+                   [(get-else $ ?e :boostagram/type :sat) ?boost-type]]}}]}
