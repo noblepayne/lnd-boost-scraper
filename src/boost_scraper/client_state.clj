@@ -39,7 +39,7 @@
   [conn client-id show-slug new-last-seen]
   (let [key (client-state-key client-id show-slug)
         now (long (/ (System/currentTimeMillis) 1000))]
-    (if-let [existing (get-client-state conn client-id show-slug)]
+    (if (get-client-state conn client-id show-slug)
       (d/transact! conn [[:db/add [:client-state/key key] :client-state/last-seen-tx new-last-seen]
                          [:db/add [:client-state/key key] :client-state/last-accessed-tx now]])
       (d/transact! conn [{:client-state/key key
@@ -53,7 +53,7 @@
   [conn client-id show-slug]
   (let [key (client-state-key client-id show-slug)
         now (long (/ (System/currentTimeMillis) 1000))]
-    (if-let [existing (get-client-state conn client-id show-slug)]
+    (if (get-client-state conn client-id show-slug)
       (d/transact! conn [[:db/add [:client-state/key key] :client-state/last-accessed-tx now]])
       (d/transact! conn [{:client-state/key key
                           :client-state/client-id client-id
@@ -64,7 +64,7 @@
   "Delete a specific client state. Does nothing if not found."
   [conn client-id show-slug]
   (let [key (client-state-key client-id show-slug)]
-    (when-let [existing (get-client-state conn client-id show-slug)]
+    (when (get-client-state conn client-id show-slug)
       (d/transact! conn [[:db/retractEntity [:client-state/key key]]]))))
 
 (defn list-client-states
@@ -79,8 +79,8 @@
   "Delete client states not accessed within the given number of days.
    Returns count of deleted states."
   [conn days]
-  (let [cutoff (- (long (/ (System/currentTimeMillis) 1000))
-                  (* days 24 60 60))
+  (let [#_:clj-kondo/ignore cutoff (- (long (/ (System/currentTimeMillis) 1000))
+                                      (* days 24 60 60))
         old-states (d/q '[:find ?e .
                           :where
                           [?e :client-state/key]
