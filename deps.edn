@@ -1,31 +1,30 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
-         ;; database
         datalevin/datalevin {:mvn/version "0.9.13"}
-         ;; HTTP
         cheshire/cheshire {:mvn/version "5.13.0"}
-        org.babashka/http-client {:mvn/version "0.4.22"}
+         org.babashka/http-client {:mvn/version "0.4.22"}
+         com.cognitect.aws/s3 {:mvn/version "871.2.43.0"}
+         com.cognitect.aws/api {:mvn/version "0.8.723"}
+         com.cognitect.aws/endpoints {:mvn/version "871.2.46.0"}
         aleph/aleph {:mvn/version "0.8.2"}
         metosin/reitit {:mvn/version "0.7.2"}
         metosin/muuntaja {:mvn/version "0.6.11"}
-         ;; markdown and hiccup
         com.kiranshila/cybermonday {:mvn/version "0.6.215"}
         dev.onionpancakes/chassis {:mvn/version "1.0.365"}
-         ;; validation
         metosin/malli {:mvn/version "0.17.0"}
-         ;; config
         aero/aero {:mvn/version "1.1.6"}
-         ;; cli interface
         org.babashka/cli {:mvn/version "0.8.60"}}
  :aliases
- {:jvm-base {:jvm-opts [;; required by datalevin
-                        "--add-opens=java.base/java.nio=ALL-UNNAMED"
+ {:jvm-base {:jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                         "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                        ;; lnd uses cert with "localhost"
                         "-Djdk.internal.httpclient.disableHostnameVerification"]}
   :neil {:project {:name com.noblepayne/lnd-boost-scraper}}
-  :outdated {;; Note that it is `:deps`, not `:extra-deps`
-             :deps {com.github.liquidz/antq {:mvn/version "RELEASE"}}
+  :outdated {:deps {com.github.liquidz/antq {:mvn/version "RELEASE"}}
              :main-opts ["-m" "antq.core"]}
   :test {:extra-paths ["test"]
-         :main-opts ["-e" "(require 'boost-scraper.api-test) (clojure.test/run-tests 'boost-scraper.api-test)"]}}}
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner"]
+         :exec-fn cognitect.test-runner.api/test
+         :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}}}

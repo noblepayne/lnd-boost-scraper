@@ -33,6 +33,31 @@ with lib; let
     nodecanMacaroonPath = mkOption {
       type = types.str;
     };
+    zapriteApiKeyPath = mkOption {
+      type = types.str;
+      default = "";
+      description = "Path to the Zaprite API key file. Empty to disable.";
+    };
+    r2AccessKeyIdPath = mkOption {
+      type = types.str;
+      default = "";
+      description = "Path to the R2 access key ID file. Empty to disable.";
+    };
+    r2SecretAccessKeyPath = mkOption {
+      type = types.str;
+      default = "";
+      description = "Path to the R2 secret access key file. Empty to disable.";
+    };
+    r2AccountId = mkOption {
+      type = types.str;
+      default = "";
+      description = "R2 Cloudflare account ID (subdomain of r2.cloudflarestorage.com).";
+    };
+    r2BoostBucket = mkOption {
+      type = types.str;
+      default = "";
+      description = "R2 bucket name for member boost records.";
+    };
     pkg = mkOption {
       type = types.package;
       defaultText = "config.lnd-boost-scraper.pkg";
@@ -83,6 +108,11 @@ in {
         JBNODE_MACAROON_PATH = cfg.jbnodeMacaroonPath;
         NODECAN_MACAROON_PATH = cfg.nodecanMacaroonPath;
         SCRAPER_UIPORT = builtins.toString cfg.uiPort;
+        ZAPRITE_API_KEY_PATH = cfg.zapriteApiKeyPath;
+        R2_ACCESS_KEY_ID_PATH = cfg.r2AccessKeyIdPath;
+        R2_SECRET_ACCESS_KEY_PATH = cfg.r2SecretAccessKeyPath;
+        R2_ACCOUNT_ID = cfg.r2AccountId;
+        R2_BOOST_BUCKET = cfg.r2BoostBucket;
       };
     };
   };
