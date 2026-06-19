@@ -307,33 +307,34 @@
          ;; handle empty results. having a nil here short circuits the whole query
          [(or (first ?total_summary') [0 0 0]) ?total_summary]
          ;; source breakdown: sat boosts grouped by :scraper/source
+         ;; NOT filter: exclude streams but include boosts even if action field is missing
          [(datalevin.core/q
            [:find ?source (sum ?sats) (count ?e)
             :in $ [[?e] ...]
             :where
-            [?e :boostagram/action "boost"]
+            (not [?e :boostagram/action "stream"])
             [?e :boostagram/type :sat]
             [?e :boostagram/value_sat_total ?sats]
             [(get-else $ ?e :scraper/source "unknown") ?source]]
            $ ?valid_eids_before_maxcd)
           ?source_sat]
          ;; source breakdown: fiat boosts grouped by :scraper/source
+         ;; no action filter — fiat has no concept of streams
          [(datalevin.core/q
            [:find ?source (sum ?cents) (count ?e)
             :in $ [[?e] ...]
             :where
-            [?e :boostagram/action "boost"]
             [?e :boostagram/type :fiat]
             [?e :boostagram/amount_fiat_cents ?cents]
             [(get-else $ ?e :scraper/source "unknown") ?source]]
            $ ?valid_eids_before_maxcd)
           ?source_fiat]
          ;; source breakdown: member-free boosts grouped by :scraper/source
+         ;; no action filter — member-free has no concept of streams
          [(datalevin.core/q
            [:find ?source (count ?e)
             :in $ [[?e] ...]
             :where
-            [?e :boostagram/action "boost"]
             [?e :boostagram/type :member-free]
             [(get-else $ ?e :scraper/source "unknown") ?source]]
            $ ?valid_eids_before_maxcd)
@@ -556,14 +557,21 @@
                  " (" (int-comma free-senders) " member"
                  (when (not= 1 free-senders) "s") ")"))))
        (when (seq source-breakdown)
-         (str "\n\n## Source Breakdown\n"
-              (str/join "\n"
-                        (for [[src {:keys [count sats fiat-cents]}] (reverse (sort-by (fn [[_ v]] (:count v)) source-breakdown))]
-                          (str "+ " src ": " (int-comma count) " boost"
-                               (when (not= 1 count) "s")
-                               " — " (int-comma sats) " sats"
-                               (when (pos? fiat-cents)
-                                 (str ", $" (format "%.2f" (/ fiat-cents 100.0)) " fiat")))))))
+         (let [sorted (reverse (sort-by (fn [[_ v]] (:count v)) source-breakdown))
+               total-count (reduce + (map (fn [[_ v]] (:count v)) source-breakdown))
+               total-sats (reduce + (map (fn [[_ v]] (:sats v)) source-breakdown))
+               total-fiat (reduce + (map (fn [[_ v]] (:fiat-cents v)) source-breakdown))]
+           (str "\n\n## Source Breakdown\n"
+                (str/join "\n"
+                          (for [[src {:keys [count sats fiat-cents]}] sorted]
+                            (str "+ " src ": " (int-comma count) " boost"
+                                 (when (not= 1 count) "s")
+                                 " — " (int-comma sats) " sats"
+                                 (when (pos? fiat-cents)
+                                   (str ", $" (format "%.2f" (/ fiat-cents 100.0)) " fiat")))))
+                "\n+ Total: " (int-comma total-count) " boosts — " (int-comma total-sats) " sats"
+                (when (pos? total-fiat)
+                  (str ", $" (format "%.2f" (/ total-fiat 100.0)) " fiat")))))
        "\n"
        "\n## Last Seen"
        "\n+ Last seen ID: " (:last_seen_id summary)

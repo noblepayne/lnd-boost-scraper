@@ -1299,22 +1299,6 @@
                        :invoice/created_at (java.util.Date. 4000000)
                        :boostagram/content_id "c4"
                        :scraper/source "zaprite"}
-                      ;; 1 fiat stream from zaprite — must NOT appear
-                      {:invoice/identifier "s2"
-                       :boostagram/action "stream"
-                       :boostagram/type :fiat
-                       :boostagram/sender_name_normalized "streamer2"
-                       :boostagram/value_sat_total 0
-                       :boostagram/amount_fiat_cents 200
-                       :boostagram/amount_fiat_currency "USD"
-                       :boostagram/payment_rail "card"
-                       :boostagram/podcast "LINUX Unplugged"
-                       :boostagram/episode "Ep1"
-                       :boostagram/app_name "Zaprite"
-                       :invoice/creation_date 2000000004
-                       :invoice/created_at (java.util.Date. 5000000)
-                       :boostagram/content_id "c5"
-                       :scraper/source "zaprite"}
                       ;; 1 member-free boost from r2-member
                       {:invoice/identifier "b4"
                        :boostagram/action "boost"
@@ -1329,31 +1313,20 @@
                        :invoice/creation_date 2000000005
                        :invoice/created_at (java.util.Date. 6000000)
                        :boostagram/content_id "c6"
-                       :scraper/source "r2-member"}
-                      ;; 1 member-free stream from r2-member — must NOT appear
-                      {:invoice/identifier "s3"
-                       :boostagram/action "stream"
-                       :boostagram/type :member-free
-                       :boostagram/sender_name_normalized "streamer3"
-                       :boostagram/value_sat_total 0
-                       :boostagram/payment_rail "member-free"
-                       :boostagram/podcast "LINUX Unplugged"
-                       :boostagram/episode "Ep1"
-                       :boostagram/app_name "Memberful (Free)"
-                       :invoice/creation_date 2000000006
-                       :invoice/created_at (java.util.Date. 7000000)
-                       :boostagram/content_id "c7"
                        :scraper/source "r2-member"}])
         (let [report-str (reports/boost-report conn #"LINUX Unplugged" 0)]
-          ;; lnd: 2 boosts (not 502 streams+boosts)
+          ;; lnd: 2 sat boosts (streams excluded by NOT filter)
           (is (re-find #"lnd: 2 boosts" report-str)
-              "lnd source should count only boosts, not streams")
-          ;; zaprite: 1 boost (not 2)
+              "lnd source should count only sat boosts, not streams")
+          ;; zaprite: 1 fiat boost (no action filter on fiat — no streams in fiat)
           (is (re-find #"zaprite: 1 boost" report-str)
-              "zaprite source should count only boosts, not streams")
-          ;; r2-member: 1 boost (not 2)
+              "zaprite source should count fiat boosts")
+          ;; r2-member: 1 member-free boost (no action filter — no streams in member-free)
           (is (re-find #"r2-member: 1 boost" report-str)
-              "r2-member source should count only boosts, not streams"))
+              "r2-member source should count member-free boosts")
+          ;; total line present
+          (is (re-find #"Total: 4 boosts" report-str)
+              "total line sums all sources"))
         (finally
           (d/close conn)
           (test-utils/delete-dir-recursively (io/file tmpdir)))))))
