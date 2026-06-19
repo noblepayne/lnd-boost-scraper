@@ -1236,4 +1236,126 @@
           (d/close conn)
           (test-utils/delete-dir-recursively (io/file tmpdir)))))))
 
+(deftest test-source-breakdown-excludes-streams
+  (testing "source breakdown only counts boosts, not streams"
+    (let [tmpdir (str "/tmp/test-src-breakdown-streams-" (java.util.UUID/randomUUID))
+          conn (d/get-conn tmpdir db/schema)]
+      (try
+        (d/transact! conn
+                     ;; 2 sat boosts from lnd
+                     [{:invoice/identifier "b1"
+                       :boostagram/action "boost"
+                       :boostagram/type :sat
+                       :boostagram/sender_name_normalized "user1"
+                       :boostagram/value_sat_total 50000
+                       :boostagram/podcast "LINUX Unplugged"
+                       :boostagram/episode "Ep1"
+                       :boostagram/app_name "Fountain"
+                       :boostagram/message "Boost 1"
+                       :invoice/creation_date 2000000000
+                       :invoice/created_at (java.util.Date. 1000000)
+                       :boostagram/content_id "c1"
+                       :scraper/source "lnd"}
+                      {:invoice/identifier "b2"
+                       :boostagram/action "boost"
+                       :boostagram/type :sat
+                       :boostagram/sender_name_normalized "user2"
+                       :boostagram/value_sat_total 3000
+                       :boostagram/podcast "LINUX Unplugged"
+                       :boostagram/episode "Ep1"
+                       :boostagram/app_name "Fountain"
+                       :boostagram/message "Boost 2"
+                       :invoice/creation_date 2000000001
+                       :invoice/created_at (java.util.Date. 2000000)
+                       :boostagram/content_id "c2"
+                       :scraper/source "lnd"}
+                      ;; 500 streams from lnd — must NOT appear in source breakdown
+                      {:invoice/identifier "s1"
+                       :boostagram/action "stream"
+                       :boostagram/type :sat
+                       :boostagram/sender_name_normalized "streamer1"
+                       :boostagram/value_sat_total 100
+                       :boostagram/podcast "LINUX Unplugged"
+                       :boostagram/episode "Ep1"
+                       :boostagram/app_name "Fountain"
+                       :invoice/creation_date 2000000002
+                       :invoice/created_at (java.util.Date. 3000000)
+                       :boostagram/content_id "c3"
+                       :scraper/source "lnd"}
+                      ;; 1 fiat boost from zaprite
+                      {:invoice/identifier "b3"
+                       :boostagram/action "boost"
+                       :boostagram/type :fiat
+                       :boostagram/sender_name_normalized "user3"
+                       :boostagram/value_sat_total 0
+                       :boostagram/amount_fiat_cents 5000
+                       :boostagram/amount_fiat_currency "USD"
+                       :boostagram/payment_rail "card"
+                       :boostagram/podcast "LINUX Unplugged"
+                       :boostagram/episode "Ep1"
+                       :boostagram/app_name "Zaprite"
+                       :boostagram/message "Fiat boost"
+                       :invoice/creation_date 2000000003
+                       :invoice/created_at (java.util.Date. 4000000)
+                       :boostagram/content_id "c4"
+                       :scraper/source "zaprite"}
+                      ;; 1 fiat stream from zaprite — must NOT appear
+                      {:invoice/identifier "s2"
+                       :boostagram/action "stream"
+                       :boostagram/type :fiat
+                       :boostagram/sender_name_normalized "streamer2"
+                       :boostagram/value_sat_total 0
+                       :boostagram/amount_fiat_cents 200
+                       :boostagram/amount_fiat_currency "USD"
+                       :boostagram/payment_rail "card"
+                       :boostagram/podcast "LINUX Unplugged"
+                       :boostagram/episode "Ep1"
+                       :boostagram/app_name "Zaprite"
+                       :invoice/creation_date 2000000004
+                       :invoice/created_at (java.util.Date. 5000000)
+                       :boostagram/content_id "c5"
+                       :scraper/source "zaprite"}
+                      ;; 1 member-free boost from r2-member
+                      {:invoice/identifier "b4"
+                       :boostagram/action "boost"
+                       :boostagram/type :member-free
+                       :boostagram/sender_name_normalized "user4"
+                       :boostagram/value_sat_total 0
+                       :boostagram/payment_rail "member-free"
+                       :boostagram/podcast "LINUX Unplugged"
+                       :boostagram/episode "Ep1"
+                       :boostagram/app_name "Memberful (Free)"
+                       :boostagram/message "Free boost"
+                       :invoice/creation_date 2000000005
+                       :invoice/created_at (java.util.Date. 6000000)
+                       :boostagram/content_id "c6"
+                       :scraper/source "r2-member"}
+                      ;; 1 member-free stream from r2-member — must NOT appear
+                      {:invoice/identifier "s3"
+                       :boostagram/action "stream"
+                       :boostagram/type :member-free
+                       :boostagram/sender_name_normalized "streamer3"
+                       :boostagram/value_sat_total 0
+                       :boostagram/payment_rail "member-free"
+                       :boostagram/podcast "LINUX Unplugged"
+                       :boostagram/episode "Ep1"
+                       :boostagram/app_name "Memberful (Free)"
+                       :invoice/creation_date 2000000006
+                       :invoice/created_at (java.util.Date. 7000000)
+                       :boostagram/content_id "c7"
+                       :scraper/source "r2-member"}])
+        (let [report-str (reports/boost-report conn #"LINUX Unplugged" 0)]
+          ;; lnd: 2 boosts (not 502 streams+boosts)
+          (is (re-find #"lnd: 2 boosts" report-str)
+              "lnd source should count only boosts, not streams")
+          ;; zaprite: 1 boost (not 2)
+          (is (re-find #"zaprite: 1 boost" report-str)
+              "zaprite source should count only boosts, not streams")
+          ;; r2-member: 1 boost (not 2)
+          (is (re-find #"r2-member: 1 boost" report-str)
+              "r2-member source should count only boosts, not streams"))
+        (finally
+          (d/close conn)
+          (test-utils/delete-dir-recursively (io/file tmpdir)))))))
+
 

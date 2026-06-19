@@ -311,6 +311,7 @@
            [:find ?source (sum ?sats) (count ?e)
             :in $ [[?e] ...]
             :where
+            [?e :boostagram/action "boost"]
             [?e :boostagram/type :sat]
             [?e :boostagram/value_sat_total ?sats]
             [(get-else $ ?e :scraper/source "unknown") ?source]]
@@ -321,6 +322,7 @@
            [:find ?source (sum ?cents) (count ?e)
             :in $ [[?e] ...]
             :where
+            [?e :boostagram/action "boost"]
             [?e :boostagram/type :fiat]
             [?e :boostagram/amount_fiat_cents ?cents]
             [(get-else $ ?e :scraper/source "unknown") ?source]]
@@ -331,6 +333,7 @@
            [:find ?source (count ?e)
             :in $ [[?e] ...]
             :where
+            [?e :boostagram/action "boost"]
             [?e :boostagram/type :member-free]
             [(get-else $ ?e :scraper/source "unknown") ?source]]
            $ ?valid_eids_before_maxcd)
