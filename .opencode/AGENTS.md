@@ -82,6 +82,15 @@ clojure -X:test              # same, via exec-fn
 
 Tests auto-discover namespaces ending in `-test`. When adding a new test namespace, name it `boost-scraper.<thing>-test` in `test/boost_scraper/<thing>_test.clj`.
 
+### Test-First Workflow (for behavior changes)
+1. **Write/update the test first** — express the desired behavior as an assertion
+2. **Run tests** — confirm the new test fails (red)
+3. **Implement the change** — make the test pass (green)
+4. **Run full suite** — confirm no regressions
+5. **Sub-agent review** — dispatch a research agent to double-check the diff
+
+This catches logic errors early and ensures the test actually validates what you think it does.
+
 ### Principles
 - **Unit tests need zero infrastructure**: no database, no network, no filesystem.
 - **Pure functions are tested directly**. See `db_test.clj` for `normalize-name`, `remove-nil-vals`, `sha256`, `flatten-paths`, `namespace-invoice-keys`.
@@ -196,7 +205,6 @@ nix flake check --impure                         # full flake check
 
 ## What's Next
 
-- **Push & deploy**: 2 unpushed commits (`b5815a8`, `c9aa123`) — build and deploy to nodecan
 - **Verify price feed**: Check journalctl for `"Price feed: got BTC/USD"` after deploy
 - **Cycle interval**: Consider bumping `scrape-sleep-interval` from 60s to 300s — external API rate limits (Zaprite, R2, price feed, mempool)
 - **Alby/LND/Nodecan slow pagination**: Accept as pre-existing, or investigate `get-all-boosts-until-epoch` — they paginate through all historical invoices every cycle even when caught up
