@@ -488,6 +488,49 @@
       (is (str/includes? output "Total Member Free Boosts: 1 (1 member)"))
       (is (str/includes? output "Last seen ID: 42")))))
 
+(deftest test-format-sorted-report-section-ordering
+  (testing "Thanks appears after Member Free Boosts and before Boost Summary"
+    (let [now (java.util.Date.)
+          mk-boost (fn [sender sat-total ts]
+                     {:boostagram/sender_name_normalized sender
+                      :boostagram/value_sat_total sat-total
+                      :boostagram/message (str sender " msg")
+                      :invoice/creation_date ts
+                      :invoice/created_at now})
+          sorted {:ballers [{:sender "a" :total 50000 :count 1 :mindate 1000
+                             :boosts [(mk-boost "a" 50000 1000)]}]
+                  :boosts [{:sender "b" :total 5000 :count 1 :mindate 2000
+                            :boosts [(mk-boost "b" 5000 2000)]}]
+                  :thanks [{:sender "c" :total 500 :count 1 :mindate 3000
+                            :boosts [(mk-boost "c" 500 3000)]}]
+                  :fiat-boosts [{:sender "d" :total 1000 :count 1
+                                 :boosts [{:boostagram/sender_name_normalized "d"
+                                           :boostagram/amount_fiat_cents 1000
+                                           :boostagram/amount_fiat_currency "USD"
+                                           :boostagram/payment_rail "card"
+                                           :boostagram/message "d fiat"
+                                           :invoice/creation_date 4000
+                                           :invoice/created_at now}]}]
+                  :member-free-boosts [{:sender "e" :count 1
+                                        :boosts [{:boostagram/sender_name_normalized "e"
+                                                  :boostagram/payment_rail "member-free"
+                                                  :boostagram/message "e free"
+                                                  :invoice/creation_date 5000
+                                                  :invoice/created_at now}]}]
+                  :boost-summary {:boost_total_sats 55500 :boost_total_boosts 4 :boost_total_boosters 4}
+                  :stream-summary {:stream_total_sats 0 :stream_total_streams 0 :stream_total_streamers 0}
+                  :summary {:total_sats 55500 :total_invoices 4 :total_unique_boosters 4 :last_seen_id 1}}
+          output (reports/format-sorted-report sorted)
+          sections ["## Baller Boosts" "## Boosts" "## Fiat Boosts" "## Member Free Boosts"
+                    "## Thanks" "## Boost Summary" "## Stream Summary" "## Summary" "## Last Seen"]
+          positions (mapv (fn [s] (.indexOf output s)) sections)]
+      (is (every? #(not= -1 %) positions)
+          (str "All sections must be present. Positions: " (zipmap sections positions)))
+      (dotimes [i (dec (count sections))]
+        (is (< (nth positions i) (nth positions (inc i)))
+            (str (nth sections i) " must appear before " (nth sections (inc i))
+                 " — positions: " (nth positions i) " < " (nth positions (inc i))))))))
+
 (deftest test-format-sorted-report-empty-sections
   (testing "empty fiat-boosts and member-free-boosts omit their sections"
     (let [sorted {:ballers []

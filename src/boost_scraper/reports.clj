@@ -514,14 +514,14 @@
        (format-boost-section ballers) "\n"
        "## Boosts\n"
        (format-boost-section boosts) "\n"
-       "## Thanks\n"
-       (format-boost-section thanks)
        (when (seq fiat-boosts)
          (str "\n## Fiat Boosts\n"
               (format-fiat-section fiat-boosts)))
        (when (seq member-free-boosts)
          (str "\n## Member Free Boosts\n"
               (format-member-free-section member-free-boosts)))
+       "\n## Thanks\n"
+       (format-boost-section thanks)
        "\n## Boost Summary"
        "\n+ Total Boosted Sats: " (int-comma (:boost_total_sats boost-summary))
        "\n+ Total Boosts: " (int-comma (:boost_total_boosts boost-summary))
