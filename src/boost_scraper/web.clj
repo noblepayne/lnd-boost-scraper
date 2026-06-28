@@ -6,6 +6,7 @@
             [boost-scraper.shows :as shows]
             [boost-scraper.client-state :as client-state]
             [boost-scraper.analysis :as analysis]
+            [boost-scraper.feed :as feed]
             [boost-scraper.query-proxy :as qp]
             [cheshire.core :as json]
             [clojure.edn :as edn]
@@ -27,6 +28,7 @@
   (delay
     (when-let [resource (io/resource "query_templates.edn")]
       (edn/read-string (slurp resource)))))
+
 (defn two-weeks-ago []
   (let [now (/ (System/currentTimeMillis) 1000)
         two-weeks-ago (- now (* 2 60 60 24 7))]
@@ -44,6 +46,19 @@
   (str "\n"
        (str/trim
         (slurp (io/resource "boost_report.js")))
+       "\n"))
+
+;; Feed page resources
+(def feed-css
+  (str "\n"
+       (str/trim
+        (slurp (io/resource "feed.css")))
+       "\n"))
+
+(def feed-js
+  (str "\n"
+       (str/trim
+        (slurp (io/resource "feed.js")))
        "\n"))
 
 (defn get-boosts [db-conn]
@@ -133,7 +148,6 @@
                                            :margin-right "50px"}}
                       (markdown/parse-body report)]]))]]]]]])}))))
 
-;; Top Level HTTP
 (defn routes [db-conn]
   [["/ping"
     {:get {:handler (fn [_] {:status 200 :body "pong\n"})}}]
@@ -285,7 +299,82 @@
                           {:status 404
                            :headers {"content-type" "application/json"}
                            :body (json/generate-string {:error (str "Template not found: " name)})})))}}]
-   ["/boosts" {:get {:handler (get-boosts db-conn)}}]])
+   ;; Feed API endpoint
+   ["/api/v1/feed"
+     {:get {:handler (fn [request]
+                       (let [{{:strs [show since before limit]} :params} request
+                             show-regex (when show (shows/regex-for show true))
+                             since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
+                             before (when before (try (Long/parseLong before) (catch NumberFormatException _ nil)))
+                             limit (when limit (try (Integer/parseInt limit) (catch NumberFormatException _ nil)))]
+                        (if-not show-regex
+                          {:status 400
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (str "Invalid show: " show)})}
+                          (try
+                            (let [boosts (feed/get-boosts-for-feed-v2 db-conn show-regex since before limit)]
+                              {:status 200
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string boosts)})
+                            (catch Exception e
+                              {:status 500
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:error (.getMessage e)})})))))}}]
+   ["/boosts" {:get {:handler (get-boosts db-conn)}}]
+   ;; Feed HTML page
+   ["/feed" {:get {:handler (fn [request]
+                              (let [{{:strs [show]} :params} request
+                                    include-unknown true]
+                                (try
+                                  {:status 200
+                                   :headers {"content-type" "text/html; charset=utf-8"}
+                                   :body
+                                   (html/html
+                                    [html/doctype-html5
+                                     [:html
+                                      [:head
+                                       [:meta {:charset "utf-8"}]
+                                       [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
+                                       [:meta {:name "color-scheme" :content "dark"}]
+                                       [:title "Boost Feed"]
+                                       [:style (html/raw feed-css)]]
+                                      [:body
+                                       [:div.feed-header
+                                        [:h1 [:a {:href "/feed"} "Boost Feed"]]
+                                        [:ul.nav-tabs
+                                         [:li [:a {:href "/boosts"} "Report"]]
+                                         [:li [:a.active {:href "/feed"} "Feed"]]]]
+                                       [:form.feed-filters {:id "feed-filters"}
+                                        [:label {:for "filter-show"} "Show:"]
+                                        [:select#filter-show {:name "show"}
+                                         (for [show-option (shows/show-options include-unknown)]
+                                           [:option {:value (:slug show-option)
+                                                     :selected (= (some-> show str/lower-case) (:slug show-option))} (:name show-option)])]
+                                        [:label {:for "filter-since"} "Since:"]
+                                        [:input#filter-since {:name "since" :type "number" :placeholder "Epoch timestamp"}]
+                                        [:button.btn.btn-primary {:type "submit"} "Filter"]
+                                        [:a.btn.btn-outline {:href "/feed"} "Clear"]]
+                                       [:div.feed-container {:id "feed-container"}
+                                        [:div.feed-empty
+                                         [:p "Loading boosts..."]]]
+                                       [:div.load-more {:id "load-more" :style {:display "none"}}
+                                        [:a {:href "#"} "Load older boosts..."]]
+                                       [:div.feed-footer
+                                        [:a {:href "https://github.com/Podcastindex-org/helipad" :target "_blank"} "Inspired by Helipad"]]
+                                       [:script {:type "text/javascript"} (html/raw feed-js)]]]])}
+                                  (catch Exception e
+                                    {:status 500
+                                     :headers {"content-type" "text/html; charset=utf-8"}
+                                     :body (html/html
+                                            [html/doctype-html5
+                                             [:html
+                                              [:head
+                                               [:meta {:charset "utf-8"}]
+                                               [:title "Error"]]
+                                              [:body
+                                               [:main
+                                                [:h1 "Error"]
+                                                [:p (.getMessage e)]]]]])}))))}}]])
 
 (defn http-handler [db-conn]
   (ring/ring-handler
