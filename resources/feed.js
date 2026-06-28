@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const podcastSelect = document.getElementById('filter-podcast');
   const showSelect = document.getElementById('filter-show');
   
-  let currentBefore = null;
+  let currentBefore = null; // {time: epoch, index: entity-index}
   let isLoading = false;
   
   // Format sat amount with commas
@@ -122,7 +122,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let url = `/api/v1/feed?show=${encodeURIComponent(show)}&limit=${limit}`;
     if (podcast) url += `&podcast=${encodeURIComponent(podcast)}`;
     if (since) url += `&since=${since}`;
-    if (before) url += `&before=${before}`;
+    if (before && before.time && before.index) {
+      url += `&before_time=${before.time}&before_index=${before.index}`;
+    }
     
     try {
       const response = await fetch(url);
@@ -152,7 +154,8 @@ document.addEventListener('DOMContentLoaded', function() {
       
       // Update cursor for next page
       if (boosts.length > 0) {
-        currentBefore = boosts[boosts.length - 1].time;
+        const lastBoost = boosts[boosts.length - 1];
+        currentBefore = {time: lastBoost.time, index: lastBoost.index};
         loadMoreBtn.style.display = 'block';
       }
       

@@ -70,6 +70,15 @@
       (.atZone (ZoneId/of "UTC"))
       (.format (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss"))))
 
+(defn csv-quote
+  "Quote and escape a value for CSV. Always wraps in double quotes.
+   Doubles any existing double quotes, and prefixes with single quote
+   to prevent Excel formula injection."
+  [value]
+  (let [s (str value)
+        escaped (str/replace s "\"" "\"\"")]
+    (str "\"" escaped "\"")))
+
 (defn get-boosts [db-conn]
   (fn [request]
     (let [{{:strs [show since json include-unknown client]} :params} request
@@ -311,18 +320,19 @@
    ;; Feed API endpoint — with podcast filter
    ["/api/v1/feed"
     {:get {:handler (fn [request]
-                      (let [{{:strs [show podcast since before limit]} :params} request
+                      (let [{{:strs [show podcast since before_time before_index limit]} :params} request
                             show-regex (when show (shows/regex-for show true))
                             podcast (when (and podcast (seq podcast)) podcast)
                             since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
-                            before (when before (try (Long/parseLong before) (catch NumberFormatException _ nil)))
+                            before-time (when before_time (try (Long/parseLong before_time) (catch NumberFormatException _ nil)))
+                            before-index (when before_index (try (Long/parseLong before_index) (catch NumberFormatException _ nil)))
                             limit (when limit (try (Integer/parseInt limit) (catch NumberFormatException _ nil)))]
                         (if-not show-regex
                           {:status 400
                            :headers {"content-type" "application/json"}
                            :body (json/generate-string {:error (str "Invalid show: " show)})}
                           (try
-                            (let [boosts (feed/get-boosts-for-feed-v2 db-conn show-regex podcast since before limit)]
+                            (let [boosts (feed/get-boosts-for-feed-v2 db-conn show-regex podcast since before-time before-index limit)]
                               {:status 200
                                :headers {"content-type" "application/json"}
                                :body (json/generate-string boosts)})
@@ -365,15 +375,13 @@
                                   csv-header "time,sender,sats,app,podcast,episode,message\n"
                                   csv-rows (str/join
                                             (map (fn [b]
-                                                   (let [message (str/replace (:message b) #"\"" "\"\"")
-                                                         message (str "\"" message "\"")]
-                                                     (str (format-csv-time (:time b))
-                                                          "," (:sender b)
-                                                          "," (:sats b)
-                                                          "," (:app b)
-                                                          "," (:podcast b)
-                                                          "," (:episode b)
-                                                          "," message "\n")))
+                                                   (str (csv-quote (format-csv-time (:time b)))
+                                                        "," (csv-quote (:sender b))
+                                                        "," (csv-quote (:sats b))
+                                                        "," (csv-quote (:app b))
+                                                        "," (csv-quote (:podcast b))
+                                                        "," (csv-quote (:episode b))
+                                                        "," (csv-quote (:message b)) "\n"))
                                                  boosts))
                                   csv-content (str csv-header csv-rows)]
                               {:status 200

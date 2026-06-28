@@ -7,17 +7,20 @@
    show-regex: regex for podcast/episode matching
    podcast: optional exact podcast name filter
    since: epoch seconds — fetch boosts newer than this
-   before: epoch seconds — fetch boosts older than this (cursor)
+   before-time: epoch seconds — cursor time (exclusive)
+   before-index: entity index — cursor index for same-timestamp tiebreak
    limit: max results (hard cap 200)"
   ([conn show-regex]
-   (get-boosts-for-feed-v2 conn show-regex nil nil nil 100))
+   (get-boosts-for-feed-v2 conn show-regex nil nil nil nil 100))
   ([conn show-regex podcast]
-   (get-boosts-for-feed-v2 conn show-regex podcast nil nil 100))
+   (get-boosts-for-feed-v2 conn show-regex podcast nil nil nil 100))
   ([conn show-regex podcast since]
-   (get-boosts-for-feed-v2 conn show-regex podcast since nil 100))
-  ([conn show-regex podcast since before]
-   (get-boosts-for-feed-v2 conn show-regex podcast since before 100))
-  ([conn show-regex podcast since before limit]
+   (get-boosts-for-feed-v2 conn show-regex podcast since nil nil 100))
+  ([conn show-regex podcast since before-time]
+   (get-boosts-for-feed-v2 conn show-regex podcast since before-time nil 100))
+  ([conn show-regex podcast since before-time before-index]
+   (get-boosts-for-feed-v2 conn show-regex podcast since before-time before-index 100))
+  ([conn show-regex podcast since before-time before-index limit]
    (let [cap (min (or limit 100) 200)
          base-where '[[?e :boostagram/action "boost"]
                       [?e :boostagram/podcast ?podcast]
@@ -31,25 +34,24 @@
                       [?e :invoice/add_index ?idx]]
          podcast-cond (when (and podcast (seq podcast))
                         '[(= ?podcast ?pod-filter)])
-         time-cond (cond
-                     (and since before) '[(<= ?start ?cd ?end)]
-                     since '[(<= ?start ?cd)]
-                     before '[(<= ?cd ?end)]
-                     :else nil)
+         ;; Composite cursor: older than (before-time, before-index)
+         cursor-cond (when (and before-time before-index)
+                       '[(or (< ?cd ?bt) (and (= ?cd ?bt) (< ?idx ?bi)))])
+         since-cond (when since
+                      '[(<= ?start ?cd)])
          where (cond-> base-where
                  podcast-cond (conj podcast-cond)
-                 time-cond (conj time-cond))
+                 cursor-cond (conj cursor-cond)
+                 since-cond (conj since-cond))
          find-clause '[?cd ?sender ?sats ?app ?podcast ?episode ?message ?idx]
          in-clause (cond-> '[$ ?regex]
                      podcast (conj '?pod-filter)
-                     (and since before) (into '[?start ?end])
-                     (and since (not before)) (conj '?start)
-                     (and before (not since)) (conj '?end))
+                     since (conj '?start)
+                     (and before-time before-index) (into '[?bt ?bi]))
          params (cond-> [show-regex]
                   podcast (conj podcast)
-                  (and since before) (into [since before])
-                  (and since (not before)) (conj since)
-                  (and before (not since)) (conj before))
+                  since (conj since)
+                  (and before-time before-index) (into [before-time before-index]))
          query {:find find-clause
                 :in in-clause
                 :where where}]
@@ -67,7 +69,7 @@
                    :index idx}))))))
 
 (defn get-boosts-for-csv
-  "Fetch boosts for CSV export. No limit cap, returns lazy seq for streaming."
+  "Fetch boosts for CSV export. No limit cap, returns all matching."
   [conn show-regex podcast since end]
   (let [base-where '[[?e :boostagram/action "boost"]
                      [?e :boostagram/podcast ?podcast]
