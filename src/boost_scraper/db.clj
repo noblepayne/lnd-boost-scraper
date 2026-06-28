@@ -1,5 +1,6 @@
 (ns boost-scraper.db
-  (:require [cheshire.core :as json]
+  (:require [boost-scraper.ws :as ws]
+            [cheshire.core :as json]
             [clojure.instant]
             [clojure.string :as str]
             [datalevin.core :as d]))
@@ -264,4 +265,13 @@
        ;; TODO: integrate into process-batch
        (map (fn [batch] (map #(assoc % :scraper/source source-name) batch)))
        (run! (fn [boost-batch]
-               (d/transact! conn boost-batch)))))
+               (d/transact! conn boost-batch)
+               (doseq [entity boost-batch]
+                 (when (= "boost" (:boostagram/action entity))
+                   (ws/broadcast! (select-keys entity [:boostagram/sender_name_normalized
+                                                       :boostagram/value_sat_total
+                                                       :boostagram/app_name
+                                                       :boostagram/podcast
+                                                       :boostagram/episode
+                                                       :boostagram/message
+                                                       :invoice/creation_date]))))))))

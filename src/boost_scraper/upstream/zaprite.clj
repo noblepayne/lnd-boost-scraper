@@ -2,6 +2,7 @@
   (:require [babashka.http-client :as http]
             [boost-scraper.db :as db]
             [boost-scraper.utils :as utils]
+            [boost-scraper.ws :as ws]
             [cheshire.core :as json]
             [clojure.string :as string]
             [datalevin.core :as d])
@@ -111,6 +112,14 @@
                 (when (= "web-boost" (get meta :app))
                   (let [entity (db/remove-empty-vals (process-order order))]
                     (d/transact! nodecan-conn [entity])
+                    (when (= "boost" (:boostagram/action entity))
+                      (ws/broadcast! (select-keys entity [:boostagram/sender_name_normalized
+                                                          :boostagram/value_sat_total
+                                                          :boostagram/app_name
+                                                          :boostagram/podcast
+                                                          :boostagram/episode
+                                                          :boostagram/message
+                                                          :invoice/creation_date])))
                     (swap! total inc)
                     (when-let [paid (get order :paidAt)]
                       (reset! new-cursor (str (-> (Instant/parse paid) (.plusMillis 1)))))))))

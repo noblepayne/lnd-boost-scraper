@@ -1,4 +1,4 @@
-// Feed page JavaScript - Helipad-style boost feed
+// Feed page JavaScript - Helipad-style boost feed with WebSocket live updates
 
 document.addEventListener('DOMContentLoaded', function() {
   const feedContainer = document.getElementById('feed-container');
@@ -9,6 +9,9 @@ document.addEventListener('DOMContentLoaded', function() {
   
   let currentBefore = null; // {time: epoch, index: entity-index}
   let isLoading = false;
+  let ws = null;
+  let reconnectDelay = 1000;
+  let reconnectTimer = null;
   
   // Format sat amount with commas
   function formatSats(sats) {
@@ -42,37 +45,135 @@ document.addEventListener('DOMContentLoaded', function() {
     return date.toLocaleString();
   }
   
-  // Create a boost card HTML
-  function createBoostCard(boost) {
-    const card = document.createElement('div');
-    card.className = 'boost-card';
-    card.dataset.time = boost.time;
-    
-    const messageHtml = boost.message ? 
-      `<div class="boost-message">${escapeHtml(boost.message)}</div>` : '';
-    
-    card.innerHTML = `
-      <div class="boost-meta">
-        <span class="boost-app">${escapeHtml(boost.app)}</span>
-        <span class="boost-time" title="${formatFullDateTime(boost.time)}">${formatRelativeTime(boost.time)}</span>
-      </div>
-      <div class="boost-amount">
-        <span class="sats">${formatSats(boost.sats)} sats</span>
-      </div>
-      <div class="boost-sender">from ${escapeHtml(boost.sender)}</div>
-      <div class="boost-episode">${escapeHtml(boost.podcast)} — ${escapeHtml(boost.episode)}</div>
-      ${messageHtml}
-    `;
-    
-    return card;
-  }
-  
   // Escape HTML to prevent XSS
   function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+  
+  // Create a boost card HTML
+  function createBoostCard(boost) {
+    const card = document.createElement('div');
+    card.className = 'boost-card';
+    card.dataset.time = boost.time || boost['invoice/creation_date'];
+    
+    const sender = boost.sender || boost['boostagram/sender_name_normalized'] || 'Anonymous';
+    const sats = boost.sats || boost['boostagram/value_sat_total'] || 0;
+    const app = boost.app || boost['boostagram/app_name'] || 'Unknown';
+    const podcast = boost.podcast || boost['boostagram/podcast'] || '';
+    const episode = boost.episode || boost['boostagram/episode'] || '';
+    const message = boost.message || boost['boostagram/message'] || '';
+    const time = boost.time || boost['invoice/creation_date'] || 0;
+    
+    const messageHtml = message ? 
+      `<div class="boost-message">${escapeHtml(message)}</div>` : '';
+    
+    card.innerHTML = `
+      <div class="boost-meta">
+        <span class="boost-app">${escapeHtml(app)}</span>
+        <span class="boost-time" title="${formatFullDateTime(time)}">${formatRelativeTime(time)}</span>
+      </div>
+      <div class="boost-amount">
+        <span class="sats">${formatSats(sats)} sats</span>
+      </div>
+      <div class="boost-sender">from ${escapeHtml(sender)}</div>
+      <div class="boost-episode">${escapeHtml(podcast)} — ${escapeHtml(episode)}</div>
+      ${messageHtml}
+    `;
+    
+    return card;
+  }
+  
+  // Show connection status indicator
+  function showConnectionStatus(status) {
+    let indicator = document.getElementById('ws-status');
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = 'ws-status';
+      indicator.style.cssText = 'position:fixed;top:8px;right:8px;padding:4px 12px;border-radius:4px;font-size:12px;z-index:1000;transition:opacity 0.3s;';
+      document.body.appendChild(indicator);
+    }
+    
+    switch (status) {
+      case 'connected':
+        indicator.style.background = '#2d5a2d';
+        indicator.style.color = '#8f8';
+        indicator.textContent = 'Live';
+        indicator.style.opacity = '1';
+        setTimeout(() => { indicator.style.opacity = '0.5'; }, 2000);
+        break;
+      case 'connecting':
+        indicator.style.background = '#5a5a2d';
+        indicator.style.color = '#ff8';
+        indicator.textContent = 'Connecting...';
+        indicator.style.opacity = '1';
+        break;
+      case 'disconnected':
+        indicator.style.background = '#5a2d2d';
+        indicator.style.color = '#f88';
+        indicator.textContent = 'Reconnecting...';
+        indicator.style.opacity = '1';
+        break;
+    }
+  }
+  
+  // WebSocket connection with auto-reconnect
+  function connectWebSocket() {
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
+    
+    showConnectionStatus('connecting');
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${protocol}//${location.host}/ws/boosts`);
+    
+    ws.onopen = function() {
+      console.log('WebSocket connected');
+      showConnectionStatus('connected');
+      reconnectDelay = 1000; // Reset backoff on successful connect
+    };
+    
+    ws.onmessage = function(event) {
+      try {
+        const boost = JSON.parse(event.data);
+        const card = createBoostCard(boost);
+        
+        // Remove empty state if present
+        const emptyState = feedContainer.querySelector('.feed-empty');
+        if (emptyState) emptyState.remove();
+        
+        // Prepend new boost to feed
+        feedContainer.insertBefore(card, feedContainer.firstChild);
+        
+        // Flash the card to draw attention
+        card.style.background = '#2a3a2a';
+        setTimeout(() => { card.style.background = ''; }, 1000);
+      } catch (e) {
+        console.error('Error processing WebSocket message:', e);
+      }
+    };
+    
+    ws.onclose = function() {
+      console.log('WebSocket disconnected, reconnecting in ' + reconnectDelay + 'ms');
+      showConnectionStatus('disconnected');
+      scheduleReconnect();
+    };
+    
+    ws.onerror = function(error) {
+      console.error('WebSocket error:', error);
+      ws.close();
+    };
+  }
+  
+  // Schedule reconnection with exponential backoff
+  function scheduleReconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(function() {
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      connectWebSocket();
+    }, reconnectDelay);
   }
   
   // Load podcasts for the current show
@@ -140,7 +241,7 @@ document.addEventListener('DOMContentLoaded', function() {
         feedContainer.innerHTML = `
           <div class="feed-empty">
             <p>No boosts found.</p>
-            <p>This screen will automatically refresh when new boosts are received.</p>
+            <p>Waiting for live boosts...</p>
           </div>
         `;
         loadMoreBtn.style.display = 'none';
@@ -220,9 +321,12 @@ document.addEventListener('DOMContentLoaded', function() {
     loadBoosts(null, false);
   });
   
-  // Auto-refresh every 60 seconds
+  // Connect WebSocket for live updates
+  connectWebSocket();
+  
+  // Polling fallback every 60 seconds (for degraded mode / WebSocket failure)
   setInterval(function() {
-    if (!isLoading) {
+    if (!isLoading && (!ws || ws.readyState !== WebSocket.OPEN)) {
       loadBoosts(null, false);
     }
   }, 60000);

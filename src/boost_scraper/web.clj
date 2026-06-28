@@ -8,6 +8,7 @@
             [boost-scraper.analysis :as analysis]
             [boost-scraper.feed :as feed]
             [boost-scraper.query-proxy :as qp]
+            [boost-scraper.ws :as ws]
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -169,6 +170,8 @@
 (defn routes [db-conn]
   [["/ping"
     {:get {:handler (fn [_] {:status 200 :body "pong\n"})}}]
+   ["/ws/boosts"
+    {:get {:handler ws/ws-handler}}]
    ["/api/v1/shows"
     {:get {:handler (fn [request]
                       (let [include-unknown-param (get-in request [:params "include-unknown"])

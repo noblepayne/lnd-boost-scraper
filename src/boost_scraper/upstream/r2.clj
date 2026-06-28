@@ -1,6 +1,7 @@
 (ns boost-scraper.upstream.r2
   (:require [boost-scraper.db :as db]
             [boost-scraper.utils :as utils]
+            [boost-scraper.ws :as ws]
             [cheshire.core :as json]
             [cognitect.aws.client.api :as aws]
             [cognitect.aws.credentials :as credentials]
@@ -119,6 +120,14 @@
                   (let [record (json/parse-string body true)
                         entity (db/remove-empty-vals (process-record record key))]
                     (d/transact! nodecan-conn [entity])
+                    (when (= "boost" (:boostagram/action entity))
+                      (ws/broadcast! (select-keys entity [:boostagram/sender_name_normalized
+                                                          :boostagram/value_sat_total
+                                                          :boostagram/app_name
+                                                          :boostagram/podcast
+                                                          :boostagram/episode
+                                                          :boostagram/message
+                                                          :invoice/creation_date])))
                     (swap! total inc)
                     (reset! last-key key)))))))
         ;; Cursor advances only on successful object processing, not on
