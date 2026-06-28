@@ -8,7 +8,8 @@
       (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy/MM/dd h:mm:ss a zzz"))))
 
 (defn format-seconds [seconds]
-  (let [hours (quot seconds 3600)
+  (let [seconds (long seconds)
+        hours (quot seconds 3600)
         mins (quot (mod seconds 3600) 60)
         secs (mod seconds 60)]
     (if (pos? hours)

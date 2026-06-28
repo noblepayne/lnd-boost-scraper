@@ -19,7 +19,10 @@
    :app (:boostagram/app_name boost)
    :podcast (:boostagram/podcast boost)
    :episode (:boostagram/episode boost)
-   :message (:boostagram/message boost)})
+   :message (:boostagram/message boost)
+   :fiat_cents (:boostagram/amount_fiat_cents boost)
+   :payment_rail (:boostagram/payment_rail boost)
+   :fiat_currency (:boostagram/amount_fiat_currency boost)})
 
 (defn broadcast!
   "Send boost data to all connected WebSocket clients."

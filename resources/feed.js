@@ -85,6 +85,30 @@ document.addEventListener('DOMContentLoaded', function() {
     const episode = boost.episode || boost['boostagram/episode'] || '';
     const message = boost.message || boost['boostagram/message'] || '';
     const time = boost.time || boost['invoice/creation_date'] || 0;
+    const fiatCents = boost.fiat_cents || boost['boostagram/amount_fiat_cents'] || 0;
+    const paymentRail = boost.payment_rail || boost['boostagram/payment_rail'] || '';
+    const fiatCurrency = boost.fiat_currency || boost['boostagram/amount_fiat_currency'] || '';
+    
+    // Determine boost type and value display
+    let valueHtml = '';
+    let cardType = '';
+    if (paymentRail === 'member-free') {
+      valueHtml = '<span class="boost-badge badge-member">Member Boost</span>';
+      cardType = 'member-free';
+    } else if (fiatCents > 0) {
+      const dollars = (fiatCents / 100).toFixed(2);
+      const rail = paymentRail || 'card';
+      valueHtml = `<span class="boost-fiat">$${dollars}</span> <span class="boost-rail">(${rail})</span>`;
+      cardType = 'fiat';
+    } else if (sats > 0) {
+      valueHtml = `<span class="sats">${formatSats(sats)} sats</span>`;
+      cardType = 'sats';
+    } else {
+      valueHtml = '<span class="sats">0 sats</span>';
+    }
+    
+    // Boost type class for card styling
+    if (cardType) card.classList.add('type-' + cardType);
     
     const messageHtml = message ? 
       `<div class="boost-message">${escapeHtml(message)}</div>` : '';
@@ -94,9 +118,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <span class="boost-app">${escapeHtml(app)}</span>
         <span class="boost-time" title="${formatFullDateTime(time)}">${formatRelativeTime(time)}</span>
       </div>
-      <div class="boost-amount">
-        <span class="sats">${formatSats(sats)} sats</span>
-      </div>
+      <div class="boost-amount">${valueHtml}</div>
       <div class="boost-sender">from ${escapeHtml(sender)}</div>
       <div class="boost-episode">${escapeHtml(podcast)} — ${escapeHtml(episode)}</div>
       ${messageHtml}

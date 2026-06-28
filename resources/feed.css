@@ -11,6 +11,9 @@
   --border-color: #4c4c4c;
   --boost-bg: #c4c4df;
   --boost-text: #000000;
+  --fiat-color: #f0ad4e;
+  --member-color: #9b59b6;
+  --sats-color: #198754;
 }
 
 body {
@@ -146,6 +149,19 @@ body {
   padding: 0.75rem;
   margin-bottom: 0.5rem;
   position: relative;
+  border-left: 3px solid transparent;
+}
+
+.boost-card.type-sats {
+  border-left-color: var(--sats-color);
+}
+
+.boost-card.type-fiat {
+  border-left-color: var(--fiat-color);
+}
+
+.boost-card.type-member-free {
+  border-left-color: var(--member-color);
 }
 
 .boost-meta {
@@ -177,6 +193,31 @@ body {
 
 .boost-amount .sats {
   color: var(--accent-green);
+}
+
+.boost-amount .boost-fiat {
+  color: #c07000;
+  font-weight: bold;
+}
+
+.boost-amount .boost-rail {
+  color: #666;
+  font-size: 0.875rem;
+  font-weight: normal;
+}
+
+.boost-badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-member {
+  background: var(--member-color);
+  color: white;
 }
 
 .boost-sender {

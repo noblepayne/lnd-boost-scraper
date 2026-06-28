@@ -23,15 +23,18 @@
   ([conn show-regex podcast since before-time before-index limit]
    (let [cap (min (or limit 100) 200)
          base-where '[[?e :boostagram/action "boost"]
-                      [?e :boostagram/podcast ?podcast]
-                      [?e :invoice/creation_date ?cd]
-                      [(re-matches ?regex ?podcast)]
-                      [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
-                      [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
-                      [(get-else $ ?e :boostagram/value_sat_total 0) ?sats]
-                      [(get-else $ ?e :boostagram/app_name "Unknown") ?app]
-                      [(get-else $ ?e :boostagram/message "") ?message]
-                      [(get-else $ ?e :invoice/add_index 0) ?idx]]
+                       [?e :boostagram/podcast ?podcast]
+                       [?e :invoice/creation_date ?cd]
+                       [(re-matches ?regex ?podcast)]
+                       [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                       [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
+                       [(get-else $ ?e :boostagram/value_sat_total 0) ?sats]
+                       [(get-else $ ?e :boostagram/app_name "Unknown") ?app]
+                       [(get-else $ ?e :boostagram/message "") ?message]
+                       [(get-else $ ?e :invoice/add_index 0) ?idx]
+                       [(get-else $ ?e :boostagram/amount_fiat_cents 0) ?fiat-cents]
+                       [(get-else $ ?e :boostagram/payment_rail "") ?rail]
+                       [(get-else $ ?e :boostagram/amount_fiat_currency "") ?fiat-currency]]
          podcast-cond (when (and podcast (seq podcast))
                         '[(= ?podcast ?pod-filter)])
          ;; Composite cursor: older than (before-time, before-index)
@@ -43,7 +46,7 @@
                  podcast-cond (conj podcast-cond)
                  cursor-cond (conj cursor-cond)
                  since-cond (conj since-cond))
-         find-clause '[?cd ?sender ?sats ?app ?podcast ?episode ?message ?idx]
+         find-clause '[?cd ?sender ?sats ?app ?podcast ?episode ?message ?idx ?fiat-cents ?rail ?fiat-currency]
          in-clause (cond-> '[$ ?regex]
                      podcast (conj '?pod-filter)
                      since (conj '?start)
@@ -58,7 +61,7 @@
      (->> (apply d/q query (d/db conn) params)
           (sort-by first >)
           (take cap)
-          (mapv (fn [[cd sender sats app podcast episode message idx]]
+          (mapv (fn [[cd sender sats app podcast episode message idx fiat-cents rail fiat-currency]]
                   {:time cd
                    :sender sender
                    :sats sats
@@ -66,21 +69,27 @@
                    :podcast podcast
                    :episode episode
                    :message message
-                   :index idx}))))))
+                   :index idx
+                   :fiat_cents fiat-cents
+                   :payment_rail rail
+                   :fiat_currency fiat-currency}))))))
 
 (defn get-boosts-for-csv
   "Fetch boosts for CSV export. No limit cap, returns all matching."
   [conn show-regex podcast since end]
   (let [base-where '[[?e :boostagram/action "boost"]
-                     [?e :boostagram/podcast ?podcast]
-                     [?e :invoice/creation_date ?cd]
-                     [(re-matches ?regex ?podcast)]
-                     [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
-                     [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
-                     [(get-else $ ?e :boostagram/value_sat_total 0) ?sats]
-                     [(get-else $ ?e :boostagram/app_name "Unknown") ?app]
-                     [(get-else $ ?e :boostagram/message "") ?message]
-                     [(get-else $ ?e :invoice/add_index 0) ?idx]]
+                      [?e :boostagram/podcast ?podcast]
+                      [?e :invoice/creation_date ?cd]
+                      [(re-matches ?regex ?podcast)]
+                      [(get-else $ ?e :boostagram/episode "Unknown Episode") ?episode]
+                      [(get-else $ ?e :boostagram/sender_name_normalized "N/A") ?sender]
+                      [(get-else $ ?e :boostagram/value_sat_total 0) ?sats]
+                      [(get-else $ ?e :boostagram/app_name "Unknown") ?app]
+                      [(get-else $ ?e :boostagram/message "") ?message]
+                      [(get-else $ ?e :invoice/add_index 0) ?idx]
+                      [(get-else $ ?e :boostagram/amount_fiat_cents 0) ?fiat-cents]
+                      [(get-else $ ?e :boostagram/payment_rail "") ?rail]
+                      [(get-else $ ?e :boostagram/amount_fiat_currency "") ?fiat-currency]]
         podcast-cond (when (and podcast (seq podcast))
                        '[(= ?podcast ?pod-filter)])
         time-cond (cond
@@ -91,7 +100,7 @@
         where (cond-> base-where
                 podcast-cond (conj podcast-cond)
                 time-cond (conj time-cond))
-        find-clause '[?cd ?sender ?sats ?app ?podcast ?episode ?message ?idx]
+        find-clause '[?cd ?sender ?sats ?app ?podcast ?episode ?message ?idx ?fiat-cents ?rail ?fiat-currency]
         in-clause (cond-> '[$ ?regex]
                     podcast (conj '?pod-filter)
                     (and since end) (into '[?start ?end])
@@ -107,15 +116,18 @@
                :where where}]
     (->> (apply d/q query (d/db conn) params)
          (sort-by first >)
-         (mapv (fn [[cd sender sats app podcast episode message idx]]
-                 {:time cd
-                  :sender sender
-                  :sats sats
-                  :app app
-                  :podcast podcast
-                  :episode episode
-                  :message message
-                  :index idx})))))
+          (mapv (fn [[cd sender sats app podcast episode message idx fiat-cents rail fiat-currency]]
+                  {:time cd
+                   :sender sender
+                   :sats sats
+                   :app app
+                   :podcast podcast
+                   :episode episode
+                   :message message
+                   :index idx
+                   :fiat_cents fiat-cents
+                   :payment_rail rail
+                   :fiat_currency fiat-currency})))))
 
 (defn get-podcasts-for-feed
   "Get distinct podcast names matching show-regex."
