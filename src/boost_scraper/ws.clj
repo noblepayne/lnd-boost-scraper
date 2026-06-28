@@ -10,10 +10,22 @@
 
 (defonce clients (atom #{}))
 
+(defn normalize-boost
+  "Convert entity-style keys to flat API-style keys for WebSocket broadcast."
+  [boost]
+  {:time (:invoice/creation_date boost)
+   :sender (:boostagram/sender_name_normalized boost)
+   :sats (:boostagram/value_sat_total boost)
+   :app (:boostagram/app_name boost)
+   :podcast (:boostagram/podcast boost)
+   :episode (:boostagram/episode boost)
+   :message (:boostagram/message boost)})
+
 (defn broadcast!
   "Send boost data to all connected WebSocket clients."
   [boost]
-  (let [msg (json/generate-string boost)]
+  (let [normalized (normalize-boost boost)
+        msg (json/generate-string normalized)]
     (bus/publish! boost-bus :boosts msg)))
 
 (defn client-count

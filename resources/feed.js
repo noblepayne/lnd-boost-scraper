@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
   let ws = null;
   let reconnectDelay = 1000;
   let reconnectTimer = null;
+  let seenBoosts = new Set(); // Dedup: track time+sender+sats+podcast keys
   
   // Format sat amount with commas
   function formatSats(sats) {
@@ -53,8 +54,26 @@ document.addEventListener('DOMContentLoaded', function() {
     return div.innerHTML;
   }
   
+  // Generate dedup key for a boost
+  function boostKey(boost) {
+    const sender = boost.sender || '';
+    const sats = boost.sats || 0;
+    const podcast = boost.podcast || '';
+    const message = (boost.message || '').substring(0, 80);
+    return `${boost.time}|${sender}|${sats}|${podcast}|${message}`;
+  }
+  
   // Create a boost card HTML
-  function createBoostCard(boost) {
+  function createBoostCard(boost, isWebSocket = false) {
+    const key = boostKey(boost);
+    if (seenBoosts.has(key)) return null; // Skip duplicate
+    seenBoosts.add(key);
+    
+    // Cap seen set to prevent memory leak (keep last 500)
+    if (seenBoosts.size > 500) {
+      const first = seenBoosts.values().next().value;
+      seenBoosts.delete(first);
+    }
     const card = document.createElement('div');
     card.className = 'boost-card';
     card.dataset.time = boost.time || boost['invoice/creation_date'];
@@ -138,7 +157,8 @@ document.addEventListener('DOMContentLoaded', function() {
     ws.onmessage = function(event) {
       try {
         const boost = JSON.parse(event.data);
-        const card = createBoostCard(boost);
+        const card = createBoostCard(boost, true);
+        if (!card) return; // Duplicate, skip
         
         // Remove empty state if present
         const emptyState = feedContainer.querySelector('.feed-empty');
@@ -250,7 +270,8 @@ document.addEventListener('DOMContentLoaded', function() {
       
       // Add boost cards
       boosts.forEach(boost => {
-        feedContainer.appendChild(createBoostCard(boost));
+        const card = createBoostCard(boost);
+        if (card) feedContainer.appendChild(card);
       });
       
       // Update cursor for next page
@@ -294,6 +315,7 @@ document.addEventListener('DOMContentLoaded', function() {
     filterForm.addEventListener('submit', function(e) {
       e.preventDefault();
       currentBefore = null;
+      seenBoosts.clear();
       loadBoosts(null, false);
     });
   }
@@ -303,6 +325,7 @@ document.addEventListener('DOMContentLoaded', function() {
     showSelect.addEventListener('change', function() {
       loadPodcasts().then(() => {
         currentBefore = null;
+        seenBoosts.clear();
         loadBoosts(null, false);
       });
     });
