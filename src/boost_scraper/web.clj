@@ -321,7 +321,7 @@
    ["/api/v1/feed"
     {:get {:handler (fn [request]
                       (let [{{:strs [show podcast since before_time before_index limit]} :params} request
-                            show-regex (when show (shows/regex-for show true))
+                            show-regex (when show (some-> (shows/regex-for show true) re-pattern))
                             podcast (when (and podcast (seq podcast)) podcast)
                             since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
                             before-time (when before_time (try (Long/parseLong before_time) (catch NumberFormatException _ nil)))
@@ -344,7 +344,7 @@
    ["/api/v1/feed/podcasts"
     {:get {:handler (fn [request]
                       (let [{{:strs [show]} :params} request
-                            show-regex (when show (shows/regex-for show true))]
+                            show-regex (when show (some-> (shows/regex-for show true) re-pattern))]
                         (if-not show-regex
                           {:status 400
                            :headers {"content-type" "application/json"}
@@ -362,7 +362,7 @@
    ["/feed.csv"
     {:get {:handler (fn [request]
                       (let [{{:strs [show podcast since end]} :params} request
-                            show-regex (when show (shows/regex-for show true))
+                            show-regex (when show (some-> (shows/regex-for show true) re-pattern))
                             podcast (when (and podcast (seq podcast)) podcast)
                             since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
                             end (when end (try (Long/parseLong end) (catch NumberFormatException _ nil)))]
