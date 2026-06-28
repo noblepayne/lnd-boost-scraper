@@ -365,15 +365,15 @@
                  :invoice/creation_date 2000000000
                  :invoice/created_at now
                  :scraper/source "lnd"}
-           raw [[]
-                [["boundary-user" 2000 1 2000000000 [boost]]]
-                []
-                []
-                []
-                [2000 1 1]
-                [0 0 0]
-                [2000 1 1]
-                nil]
+          raw [[]
+               [["boundary-user" 2000 1 2000000000 [boost]]]
+               []
+               []
+               []
+               [2000 1 1]
+               [0 0 0]
+               [2000 1 1]
+               nil]
           result (reports/sort-report raw)]
       (is (empty? (:ballers result)))
       (is (= 1 (count (:boosts result))))
@@ -388,15 +388,15 @@
                  :invoice/creation_date 2000000000
                  :invoice/created_at now
                  :scraper/source "lnd"}
-           raw [[]  ;; ballers
-                []  ;; boosts
-                [["thanks-user" 1999 1 2000000000 [boost]]]  ;; thanks
-                []  ;; fiat-by-sender
-                []  ;; member-free-by-sender
-                [1999 1 1]  ;; boost-summary
-                [0 0 0]  ;; stream-summary
-                [1999 1 1]  ;; total-summary
-                nil]  ;; last-seen-id
+          raw [[]  ;; ballers
+               []  ;; boosts
+               [["thanks-user" 1999 1 2000000000 [boost]]]  ;; thanks
+               []  ;; fiat-by-sender
+               []  ;; member-free-by-sender
+               [1999 1 1]  ;; boost-summary
+               [0 0 0]  ;; stream-summary
+               [1999 1 1]  ;; total-summary
+               nil]  ;; last-seen-id
           result (reports/sort-report raw)]
       (is (empty? (:boosts result)))
       (is (= 1 (count (:thanks result))))))

@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', function() {
   const feedContainer = document.getElementById('feed-container');
   const loadMoreBtn = document.getElementById('load-more');
   const filterForm = document.getElementById('feed-filters');
+  const podcastSelect = document.getElementById('filter-podcast');
+  const showSelect = document.getElementById('filter-show');
   
   let currentBefore = null;
   let isLoading = false;
@@ -73,16 +75,52 @@ document.addEventListener('DOMContentLoaded', function() {
     return div.innerHTML;
   }
   
+  // Load podcasts for the current show
+  async function loadPodcasts() {
+    const show = showSelect.value;
+    if (!show) return;
+    
+    try {
+      const response = await fetch(`/api/v1/feed/podcasts?show=${encodeURIComponent(show)}`);
+      if (!response.ok) throw new Error('Failed to load podcasts');
+      
+      const data = await response.json();
+      const podcasts = data.podcasts || [];
+      
+      // Save current selection
+      const currentPodcast = podcastSelect.value;
+      
+      // Clear and repopulate
+      podcastSelect.innerHTML = '<option value="">All Podcasts</option>';
+      
+      podcasts.forEach(podcast => {
+        const option = document.createElement('option');
+        option.value = podcast;
+        option.textContent = podcast;
+        podcastSelect.appendChild(option);
+      });
+      
+      // Restore selection if still exists
+      if (currentPodcast) {
+        podcastSelect.value = currentPodcast;
+      }
+    } catch (error) {
+      console.error('Error loading podcasts:', error);
+    }
+  }
+  
   // Load boosts from API
   async function loadBoosts(before = null, append = false) {
     if (isLoading) return;
     isLoading = true;
     
-    const show = document.getElementById('filter-show').value;
+    const show = showSelect.value;
+    const podcast = podcastSelect.value;
     const since = document.getElementById('filter-since').value;
     const limit = 100;
     
     let url = `/api/v1/feed?show=${encodeURIComponent(show)}&limit=${limit}`;
+    if (podcast) url += `&podcast=${encodeURIComponent(podcast)}`;
     if (since) url += `&since=${since}`;
     if (before) url += `&before=${before}`;
     
@@ -156,8 +194,28 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
   
+  // Show change handler - reload podcasts
+  if (showSelect) {
+    showSelect.addEventListener('change', function() {
+      loadPodcasts().then(() => {
+        currentBefore = null;
+        loadBoosts(null, false);
+      });
+    });
+  }
+  
+  // Podcast change handler - reload boosts
+  if (podcastSelect) {
+    podcastSelect.addEventListener('change', function() {
+      currentBefore = null;
+      loadBoosts(null, false);
+    });
+  }
+  
   // Initial load
-  loadBoosts(null, false);
+  loadPodcasts().then(() => {
+    loadBoosts(null, false);
+  });
   
   // Auto-refresh every 60 seconds
   setInterval(function() {

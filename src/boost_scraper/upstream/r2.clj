@@ -90,7 +90,6 @@
      :boostagram/amount_fiat_cents (get record :amountFiatCents)
      :boostagram/amount_fiat_currency (get record :amountFiatCurrency "USD")}))
 
-
 (defn sync-r2-boosts!
   "Fetch new member boosts from the R2 bucket and upsert into nodecan.
    Lists objects under the flat prefix using start-after cursors.
@@ -100,12 +99,12 @@
                             :access-key access-key
                             :secret-key secret-key})
         [cursor-str] (d/q '[:find [?value]
-                              :where [?e :sync-cursor/key "r2-member"]
-                              [?e :sync-cursor/value ?value]]
-                            (d/db nodecan-conn))
+                            :where [?e :sync-cursor/key "r2-member"]
+                            [?e :sync-cursor/value ?value]]
+                          (d/db nodecan-conn))
         _ (println "R2 sync starting, cursor:" (or cursor-str "(full scan)")
-                    "| bucket:" bucket
-                    "| key-prefix:" (subs (or access-key "") 0 (min 8 (count (or access-key "")))))
+                   "| bucket:" bucket
+                   "| key-prefix:" (subs (or access-key "") 0 (min 8 (count (or access-key "")))))
         total (atom 0)
         last-key (atom nil)]
     (loop [start-after cursor-str continuation-token nil]
@@ -132,7 +131,7 @@
             (recur (last keys) nil)))))
     (when @last-key
       (d/transact! nodecan-conn [{:sync-cursor/key "r2-member"
-                                   :sync-cursor/value @last-key}])
+                                  :sync-cursor/value @last-key}])
       (println "R2 cursor updated to:" @last-key))
     (println (str "R2 sync complete. Processed " @total " new member boosts."))
     @total))

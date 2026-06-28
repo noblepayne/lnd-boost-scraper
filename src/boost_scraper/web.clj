@@ -19,7 +19,9 @@
             [muuntaja.core :as m]
             [reitit.ring :as ring]
             [reitit.ring.middleware.parameters]
-            [reitit.ring.middleware.muuntaja :as muuntaja]))
+            [reitit.ring.middleware.muuntaja :as muuntaja])
+  (:import (java.time Instant ZoneId)
+           (java.time.format DateTimeFormatter)))
 
 ;; Routes
 
@@ -60,6 +62,13 @@
        (str/trim
         (slurp (io/resource "feed.js")))
        "\n"))
+
+(defn format-csv-time
+  "Format epoch seconds as YYYY-MM-DD HH:MM:SS."
+  [epoch]
+  (-> (Instant/ofEpochSecond epoch)
+      (.atZone (ZoneId/of "UTC"))
+      (.format (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss"))))
 
 (defn get-boosts [db-conn]
   (fn [request]
@@ -299,20 +308,21 @@
                           {:status 404
                            :headers {"content-type" "application/json"}
                            :body (json/generate-string {:error (str "Template not found: " name)})})))}}]
-   ;; Feed API endpoint
+   ;; Feed API endpoint — with podcast filter
    ["/api/v1/feed"
-     {:get {:handler (fn [request]
-                       (let [{{:strs [show since before limit]} :params} request
-                             show-regex (when show (shows/regex-for show true))
-                             since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
-                             before (when before (try (Long/parseLong before) (catch NumberFormatException _ nil)))
-                             limit (when limit (try (Integer/parseInt limit) (catch NumberFormatException _ nil)))]
+    {:get {:handler (fn [request]
+                      (let [{{:strs [show podcast since before limit]} :params} request
+                            show-regex (when show (shows/regex-for show true))
+                            podcast (when (and podcast (seq podcast)) podcast)
+                            since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
+                            before (when before (try (Long/parseLong before) (catch NumberFormatException _ nil)))
+                            limit (when limit (try (Integer/parseInt limit) (catch NumberFormatException _ nil)))]
                         (if-not show-regex
                           {:status 400
                            :headers {"content-type" "application/json"}
                            :body (json/generate-string {:error (str "Invalid show: " show)})}
                           (try
-                            (let [boosts (feed/get-boosts-for-feed-v2 db-conn show-regex since before limit)]
+                            (let [boosts (feed/get-boosts-for-feed-v2 db-conn show-regex podcast since before limit)]
                               {:status 200
                                :headers {"content-type" "application/json"}
                                :body (json/generate-string boosts)})
@@ -320,6 +330,60 @@
                               {:status 500
                                :headers {"content-type" "application/json"}
                                :body (json/generate-string {:error (.getMessage e)})})))))}}]
+   ;; Podcast list endpoint
+   ["/api/v1/feed/podcasts"
+    {:get {:handler (fn [request]
+                      (let [{{:strs [show]} :params} request
+                            show-regex (when show (shows/regex-for show true))]
+                        (if-not show-regex
+                          {:status 400
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (str "Invalid show: " show)})}
+                          (try
+                            (let [podcasts (feed/get-podcasts-for-feed db-conn show-regex)]
+                              {:status 200
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:podcasts podcasts})})
+                            (catch Exception e
+                              {:status 500
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:error (.getMessage e)})})))))}}]
+   ;; CSV export endpoint
+   ["/feed.csv"
+    {:get {:handler (fn [request]
+                      (let [{{:strs [show podcast since end]} :params} request
+                            show-regex (when show (shows/regex-for show true))
+                            podcast (when (and podcast (seq podcast)) podcast)
+                            since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
+                            end (when end (try (Long/parseLong end) (catch NumberFormatException _ nil)))]
+                        (if-not show-regex
+                          {:status 400
+                           :headers {"content-type" "text/csv"}
+                           :body "Invalid show parameter"}
+                          (try
+                            (let [boosts (feed/get-boosts-for-csv db-conn show-regex podcast since end)
+                                  csv-header "time,sender,sats,app,podcast,episode,message\n"
+                                  csv-rows (str/join
+                                            (map (fn [b]
+                                                   (let [message (str/replace (:message b) #"\"" "\"\"")
+                                                         message (str "\"" message "\"")]
+                                                     (str (format-csv-time (:time b))
+                                                          "," (:sender b)
+                                                          "," (:sats b)
+                                                          "," (:app b)
+                                                          "," (:podcast b)
+                                                          "," (:episode b)
+                                                          "," message "\n")))
+                                                 boosts))
+                                  csv-content (str csv-header csv-rows)]
+                              {:status 200
+                               :headers {"content-type" "text/csv"
+                                         "content-disposition" (str "attachment; filename=\"boosts-" show ".csv\"")}
+                               :body csv-content})
+                            (catch Exception e
+                              {:status 500
+                               :headers {"content-type" "text/csv"}
+                               :body (str "Error: " (.getMessage e))})))))}}]
    ["/boosts" {:get {:handler (get-boosts db-conn)}}]
    ;; Feed HTML page
    ["/feed" {:get {:handler (fn [request]
@@ -350,6 +414,9 @@
                                          (for [show-option (shows/show-options include-unknown)]
                                            [:option {:value (:slug show-option)
                                                      :selected (= (some-> show str/lower-case) (:slug show-option))} (:name show-option)])]
+                                        [:label {:for "filter-podcast"} "Podcast:"]
+                                        [:select#filter-podcast {:name "podcast"}
+                                         [:option {:value ""} "All Podcasts"]]
                                         [:label {:for "filter-since"} "Since:"]
                                         [:input#filter-since {:name "since" :type "number" :placeholder "Epoch timestamp"}]
                                         [:button.btn.btn-primary {:type "submit"} "Filter"]

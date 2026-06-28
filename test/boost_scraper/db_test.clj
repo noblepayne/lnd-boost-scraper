@@ -427,16 +427,16 @@
           conn (d/get-conn tmpdir db/schema)]
       (try
         (let [[cursor] (d/q '[:find [?value]
-                               :where [?e :sync-cursor/key "test"]
-                               [?e :sync-cursor/value ?value]]
-                             (d/db conn))]
+                              :where [?e :sync-cursor/key "test"]
+                              [?e :sync-cursor/value ?value]]
+                            (d/db conn))]
           (is (nil? cursor) "no cursor returns nil"))
         (d/transact! conn [{:sync-cursor/key "test"
                             :sync-cursor/value "some-cursor-value"}])
         (let [[cursor] (d/q '[:find [?value]
-                               :where [?e :sync-cursor/key "test"]
-                               [?e :sync-cursor/value ?value]]
-                             (d/db conn))]
+                              :where [?e :sync-cursor/key "test"]
+                              [?e :sync-cursor/value ?value]]
+                            (d/db conn))]
           (is (= "some-cursor-value" cursor) "cursor reads correctly"))
         (finally
           (d/close conn)
