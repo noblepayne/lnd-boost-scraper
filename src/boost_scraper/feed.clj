@@ -31,7 +31,7 @@
                       [(get-else $ ?e :boostagram/value_sat_total 0) ?sats]
                       [(get-else $ ?e :boostagram/app_name "Unknown") ?app]
                       [(get-else $ ?e :boostagram/message "") ?message]
-                      [?e :invoice/add_index ?idx]]
+                      [(get-else $ ?e :invoice/add_index 0) ?idx]]
          podcast-cond (when (and podcast (seq podcast))
                         '[(= ?podcast ?pod-filter)])
          ;; Composite cursor: older than (before-time, before-index)
@@ -80,7 +80,7 @@
                      [(get-else $ ?e :boostagram/value_sat_total 0) ?sats]
                      [(get-else $ ?e :boostagram/app_name "Unknown") ?app]
                      [(get-else $ ?e :boostagram/message "") ?message]
-                     [?e :invoice/add_index ?idx]]
+                     [(get-else $ ?e :invoice/add_index 0) ?idx]]
         podcast-cond (when (and podcast (seq podcast))
                        '[(= ?podcast ?pod-filter)])
         time-cond (cond
