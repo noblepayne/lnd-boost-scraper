@@ -79,3 +79,19 @@ with the smallest surface that deploys cleanly; add loop only if orphans recur p
   `nix build .` + `nix build .#checks.x86_64-linux.module-options` pass.
 - Note: backfill route tests needed the PENDING fetcher injected (`rec/fetch-pending-orders`
   redef) — without it the route hits real Zaprite with the test key (401 retries).
+
+## 2026-08-20 · Phase 4 deployment decision (single-rebuild plan)
+
+- **Deploy once with `reconcileWrite = true`**, then preview → backfill in that order. Why not
+  the two-rebuild (deploy false → verify → arm true) option:
+  - `GET /preview` never writes regardless of the flag, so the confirmation step is equally safe
+    either way; the flag only arms `POST /backfill`.
+  - A stray POST while armed is bounded: it writes exactly the HIGH-confidence orphan set
+    (dedup-guarded, idempotent, never touches memphis manual-review) — i.e. the intended end
+    state, not a surprise.
+  - Saves a full rebuild/restart cycle on the box.
+- Follow-up: flip `reconcileWrite = false` on the next routine deploy — backfill is one-time and
+  the write gate should stay closed.
+- Full runbook in `docs/orphan-reconcile-phase4.md` (step 2 is a hard gate: abort if orphans ≠
+  12 / manual-review ≠ 1 / sums disagree; unmatched ≥ 0 is normal — completed orders live in the
+  ledger via the normal sync already).
