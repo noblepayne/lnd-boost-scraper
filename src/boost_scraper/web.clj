@@ -8,6 +8,7 @@
             [boost-scraper.analysis :as analysis]
             [boost-scraper.feed :as feed]
             [boost-scraper.query-proxy :as qp]
+            [boost-scraper.reconcile :as rec]
             [boost-scraper.ws :as ws]
             [cheshire.core :as json]
             [clojure.edn :as edn]
@@ -167,6 +168,8 @@
                                            :margin-right "50px"}}
                       (markdown/parse-body report)]]))]]]]]])}))))
 
+(declare handle-reconcile-preview handle-reconcile-backfill)
+
 (defn routes [db-conn]
   [["/ping"
     {:get {:handler (fn [_] {:status 200 :body "pong\n"})}}]
@@ -208,6 +211,12 @@
                          {:status 200
                           :headers {"content-type" "application/json"}
                           :body (json/generate-string {:deleted deleted})}))}}]
+   ;; Web-boost orphan reconcile (Phase 3): preview is read-only; backfill is
+   ;; write-gated by WEB_BOOST_RECONCILE_WRITE and answers 403 otherwise.
+   ["/api/v1/reconcile/preview"
+    {:get {:handler (handle-reconcile-preview db-conn)}}]
+   ["/api/v1/reconcile/backfill"
+    {:post {:handler (handle-reconcile-backfill db-conn)}}]
    ;; Analysis endpoints
    ["/api/v1/analysis/top-boosters"
     {:get {:handler (fn [request]
@@ -462,6 +471,61 @@
             :middleware [muuntaja/format-middleware
                          reitit.ring.middleware.parameters/parameters-middleware]}})
    (ring/routes (ring/create-default-handler))))
+
+(defn zaprite-api-key
+  "Slurp the Zaprite API key from its env-configured path; nil when unset."
+  []
+  (some-> (System/getenv "ZAPRITE_API_KEY_PATH") not-empty slurp str/trim not-empty))
+
+(defn reconcile-write-enabled?
+  "True when WEB_BOOST_RECONCILE_WRITE == \"true\". Read per-request so a
+   module/config flip is honored on the next request cycle."
+  []
+  (= "true" (System/getenv "WEB_BOOST_RECONCILE_WRITE")))
+
+(defn- reconcile-json
+  "JSON ring response helper for the reconcile routes."
+  [status body]
+  {:status status
+   :headers {"content-type" "application/json"}
+   :body (json/generate-string body)})
+
+(defn handle-reconcile-preview
+  "Read-only orphan detection (spec §11 Phase 3): never writes, regardless of
+   the write flag. Doubles as the prod dry-run / live-monitoring vehicle."
+  [db-conn]
+  (fn [_request]
+    (if-let [api-key (zaprite-api-key)]
+      (try
+        (reconcile-json 200
+                        (assoc (rec/sync-web-boost-reconcile! db-conn api-key)
+                               :write-enabled (reconcile-write-enabled?)))
+        (catch Exception e
+          (reconcile-json 500 {:error (str "reconcile: " (.getMessage e))})))
+      (reconcile-json 400 {:error "ZAPRITE_API_KEY_PATH not set or unreadable"}))))
+
+(defn handle-reconcile-backfill
+  "Reconcile write path (spec §11 Phase 3): same detection as preview, then
+   transacts the HIGH-confidence orphans. 403 unless WEB_BOOST_RECONCILE_WRITE
+   is \"true\"; broadcasts each write like a normal Zaprite boost."
+  [db-conn]
+  (fn [_request]
+    (if-not (reconcile-write-enabled?)
+      (reconcile-json 403 {:error "write disabled (WEB_BOOST_RECONCILE_WRITE != true)"})
+      (if-let [api-key (zaprite-api-key)]
+        (try
+          (let [result (rec/sync-web-boost-reconcile!
+                        db-conn api-key
+                        {:allow-write? true :broadcast-fn ws/broadcast!})]
+            (reconcile-json 200
+                            (assoc result
+                                   :write-enabled true
+                                   :skipped (:already-boosted result)
+                                   :manual-review (count (:manual-review result))
+                                   :unmatched (count (:unmatched result)))))
+          (catch Exception e
+            (reconcile-json 500 {:error (str "reconcile: " (.getMessage e))})))
+        (reconcile-json 400 {:error "ZAPRITE_API_KEY_PATH not set or unreadable"})))))
 
 (defn make-virtual
   "Like utils/make-virtual but returns a Manifold deferred instead

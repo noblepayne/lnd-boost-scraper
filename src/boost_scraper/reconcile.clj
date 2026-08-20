@@ -398,6 +398,52 @@
          :total-sats-skipped sats-skip
          :total-sats-orphaned sats-orphan}))))
 
+(def reconcile-broadcast-keys
+  "WebSocket payload keys for a written orphan — identical to what
+   `sync-zaprite-boosts!` broadcasts for a normal Zaprite boost."
+  [:boostagram/sender_name_normalized
+   :boostagram/value_sat_total
+   :boostagram/app_name
+   :boostagram/podcast
+   :boostagram/episode
+   :boostagram/message
+   :invoice/creation_date])
+
+(defn sync-web-boost-reconcile!
+  "Compose detection + optional write (spec §11 Phase 3 shared core).
+
+   conn     :: nodecan-conn (Datalevin conn)
+   api-key  :: Zaprite API key
+   opts     :: {:allow-write? bool  — when true, d/transact! each HIGH-confidence
+                                  :entity and broadcast it (default false)
+                :fetch-pending f    — injectable pending-orders fetcher,
+                                  arity [api-key] → orders (default
+                                  fetch-pending-orders; inject to avoid HTTP)
+                :broadcast-fn f     — injectable WebSocket broadcaster, arity
+                                  [entity] (default no-op; the web suite passes
+                                  ws/broadcast! so live clients see the write)}
+
+   Returns the detect-orphans map plus :written (entities transacted). Preview
+   callers pass no opts; the write is always opt-in. Idempotent: the dedup
+   guard inside detect-orphans skips identifiers/order-ids already boosted, so
+   a second call (or a crashed-backfill restart) writes nothing new."
+  ([conn api-key]
+   (sync-web-boost-reconcile! conn api-key {}))
+  ([conn api-key {:keys [allow-write? fetch-pending broadcast-fn]}]
+   (let [fetcher (or fetch-pending fetch-pending-orders)
+         broadcast (or broadcast-fn (fn [_] nil))
+         detection (detect-orphans (find-web-boost-invoices conn)
+                                   (fetcher api-key)
+                                   (find-boosted-keys conn))
+         written (if allow-write?
+                   (do (doseq [o (:orphans detection)]
+                         (let [entity (:entity o)]
+                           (d/transact! conn [entity])
+                           (broadcast (select-keys entity reconcile-broadcast-keys))))
+                       (count (:orphans detection)))
+                   0)]
+     (assoc detection :written written))))
+
 (defn reconcile-report
   "Deterministic markdown summary of a detect-orphans result."
   [detection]

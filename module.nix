@@ -38,6 +38,11 @@ with lib; let
       default = "";
       description = "Path to the Zaprite API key file. Empty to disable.";
     };
+    reconcileWrite = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Allow POST /api/v1/reconcile/backfill to write reconciled web-boost orphans into the nodecan DB. Read-only GET /api/v1/reconcile/preview (detect-only) works regardless.";
+    };
     r2AccessKeyIdPath = mkOption {
       type = types.str;
       default = "";
@@ -109,6 +114,10 @@ in {
         NODECAN_MACAROON_PATH = cfg.nodecanMacaroonPath;
         SCRAPER_UIPORT = builtins.toString cfg.uiPort;
         ZAPRITE_API_KEY_PATH = cfg.zapriteApiKeyPath;
+        WEB_BOOST_RECONCILE_WRITE =
+          if cfg.reconcileWrite
+          then "true"
+          else "false";
         R2_ACCESS_KEY_ID_PATH = cfg.r2AccessKeyIdPath;
         R2_SECRET_ACCESS_KEY_PATH = cfg.r2SecretAccessKeyPath;
         R2_ACCOUNT_ID = cfg.r2AccountId;

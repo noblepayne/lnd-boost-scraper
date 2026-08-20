@@ -1,6 +1,6 @@
 # Zaprite Orphan Reconciliation — Spec
 
-Status: ACTIVE — Phase 0 ✅ (2026-08-19, verified against live infra); Phase 1 ✅ (pure parser/matcher + tests); Phase 2 ✅ code + live-verified (query-form fix), prod dry-run = via Phase 3 preview route (the box has no checkout, so the `:reconcile` alias is dev-only); Phase 3 ◐ (this spec section).
+Status: ACTIVE — Phase 0 ✅ (2026-08-19, verified against live infra); Phase 1 ✅ (pure parser/matcher + tests); Phase 2 ✅ code + live-verified (query-form fix), prod dry-run = via Phase 3 preview route (the box has no checkout, so the `:reconcile` alias is dev-only); Phase 3 ✅ code + tests (2026-08-20, routes + write gate); Phase 4 ⏳ (deploy backfill on the box).
 Repo: lnd-boost-scraper
 Author context: investigation of a stuck Web Boost order (`od_nVJ3uLtbZz`, TWIB 118 — Adam Curry, 88,888 BTC) that settled in nodecan LND but never became a COMPLETE boost in the ledger.
 

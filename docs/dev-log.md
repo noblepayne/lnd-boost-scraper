@@ -59,3 +59,23 @@ Initial findings were mostly my own over-engineering — killed four of six:
 **Scope cut**: Phase 3 = routes (`preview`/`backfill`) + `WEB_BOOST_RECONCILE_WRITE` module
 passthrough. No window, no loop wiring, no sync guard, no suppression. Rationale: fix the ledger
 with the smallest surface that deploys cleanly; add loop only if orphans recur post-webhook-fix.
+
+## 2026-08-20 · Phase 3 built (code + tests, all green)
+
+- **`sync-web-boost-reconcile!`** (reconcile.clj): composes detection seams, optionally writes
+  HIGH-confidence orphans (`d/transact!` + broadcast with the `process-order` key set). Injected
+  `:fetch-pending` / `:broadcast-fn` for hermetic tests; write is strictly opt-in.
+- **Routes** (web.clj): `GET /api/v1/reconcile/preview` (read-only, never writes) +
+  `POST /api/v1/reconcile/backfill` (403 unless `WEB_BOOST_RECONCILE_WRITE` = "true"). Both
+  read env per-request; no new args through `web/serve`.
+- **module.nix** `reconcileWrite` (bool, default false) → `WEB_BOOST_RECONCILE_WRITE`; flake
+  module-options assert extended.
+- **Tests**: idempotency (double-run → one entity, writes 0), dual-producer merge pinned against
+  real `process-order` (one entity, identifier re-keys to `zaprite-<id>`), route gating
+  (preview 200/no-write; backfill 403 off → 200 on; idempotent across requests).
+- Why the shape: keep the write path as the *only* new mutation surface — everything else
+  (window, loop, suppression) deferred/dropped per the audit.
+- Verification: 99 tests / 712 assertions green; clj-kondo 0/0; cljfmt clean; alejandra clean;
+  `nix build .` + `nix build .#checks.x86_64-linux.module-options` pass.
+- Note: backfill route tests needed the PENDING fetcher injected (`rec/fetch-pending-orders`
+  redef) — without it the route hits real Zaprite with the test key (401 retries).

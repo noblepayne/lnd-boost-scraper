@@ -124,23 +124,25 @@
         eval = pkgs.lib.evalModules {
           modules = [
             ./module.nix
-            { services.lnd-boost-scraper.enable = false; }
-            { _module.check = false; }
+            {services.lnd-boost-scraper.enable = false;}
+            {_module.check = false;}
           ];
-          specialArgs = { inherit pkgs; };
+          specialArgs = {inherit pkgs;};
         };
         opts = eval.options.services.lnd-boost-scraper;
       in {
         module-options = assert opts.zapriteApiKeyPath.type.name == "str";
-          assert opts.r2AccessKeyIdPath.type.name == "str";
-          assert opts.r2SecretAccessKeyPath.type.name == "str";
-          assert opts.r2AccountId.type.name == "str";
-          assert opts.r2BoostBucket.type.name == "str";
-          assert opts.zapriteApiKeyPath.default == "";
-          assert opts.r2AccessKeyIdPath.default == "";
-          assert opts.r2SecretAccessKeyPath.default == "";
-          assert opts.r2AccountId.default == "";
-          assert opts.r2BoostBucket.default == "";
+        assert opts.reconcileWrite.type.name == "bool";
+        assert opts.reconcileWrite.default == false;
+        assert opts.r2AccessKeyIdPath.type.name == "str";
+        assert opts.r2SecretAccessKeyPath.type.name == "str";
+        assert opts.r2AccountId.type.name == "str";
+        assert opts.r2BoostBucket.type.name == "str";
+        assert opts.zapriteApiKeyPath.default == "";
+        assert opts.r2AccessKeyIdPath.default == "";
+        assert opts.r2SecretAccessKeyPath.default == "";
+        assert opts.r2AccountId.default == "";
+        assert opts.r2BoostBucket.default == "";
           pkgs.runCommand "check-module-options" {} "touch $out";
       })
       nixpkgs.legacyPackages;

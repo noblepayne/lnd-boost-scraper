@@ -2,6 +2,7 @@
   (:require [boost-scraper.db :as db]
             [boost-scraper.reconcile :as rec]
             [boost-scraper.test-utils :as test-utils]
+            [boost-scraper.upstream.zaprite :as zaprite]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -430,3 +431,104 @@
                                     :total-sats-orphaned 0})]
       (is (str/includes? md "Orphans: 0 (0 sats)"))
       (is (str/includes? md "Unmatched: 0")))))
+
+(deftest test-sync-web-boost-reconcile
+  (let [tmpdir (str "/tmp/test-reconcile-sync-" (java.util.UUID/randomUUID))
+        conn (d/get-conn tmpdir db/schema)]
+    (try
+      (d/transact! conn
+                   [{:invoice/identifier "325043"
+                     :invoice/memo "Payment for Web Boost: TWIB 108 — debitcoinkoers.eu"
+                     :invoice/value 10000
+                     :invoice/settled true
+                     :invoice/settle_date "2026-06-13T13:34:50Z"}])
+      (let [orders [{:id "od_bofDf6orSH"
+                     :currency "BTC"
+                     :totalAmount 10000
+                     :label "Web Boost: TWIB 108 — debitcoinkoers.eu"
+                     :metadata {:app "web-boost" :username "debitcoinkoers.eu"}}]
+            broadcasts (atom [])
+            run (fn []
+                  (rec/sync-web-boost-reconcile!
+                   conn "k"
+                   {:allow-write? true
+                    :fetch-pending (fn [_] orders)
+                    :broadcast-fn (fn [payload] (swap! broadcasts conj payload))}))]
+        (let [r1 (run)]
+          (testing "first run writes the high-confidence orphan"
+            (is (= 1 (:written r1)))
+            (is (= 1 (count (:orphans r1))))
+            (is (= 0 (:already-boosted r1)))))
+        (testing "second run is idempotent"
+          (let [r2 (run)]
+            (is (= 0 (:written r2)))
+            (is (= 1 (:already-boosted r2)))))
+        (testing "exactly one boost entity exists, keyed by the LND identifier"
+          (let [entities (d/q '[:find [?e ...] :where [?e :boostagram/action "boost"]]
+                              (d/db conn))]
+            (is (= 1 (count entities)))
+            (let [ent (into {} (d/entity (d/db conn) (first entities)))]
+              (is (= "325043" (:invoice/identifier ent)))
+              (is (= "od_bofDf6orSH" (:boostagram/zaprite_order_id ent)))
+              (is (= 10000 (:boostagram/value_sat_total ent))))))
+        (testing "each write broadcasts the process-order key set"
+          (is (= 1 (count @broadcasts)))
+          (let [payload (first @broadcasts)]
+            (is (= 10000 (:boostagram/value_sat_total payload)))
+            (is (= "Zaprite" (:boostagram/app_name payload)))
+            (is (= #{:boostagram/sender_name_normalized
+                     :boostagram/value_sat_total
+                     :boostagram/app_name
+                     :boostagram/podcast
+                     :boostagram/episode
+                     :invoice/creation_date}
+                   (set (keys payload)))
+                "message is dropped here (empty in this fixture), matching process-order"))))
+      (finally
+        (d/close conn)
+        (test-utils/delete-dir-recursively (io/file tmpdir))))))
+
+(deftest test-dual-producer-merge
+  (let [tmpdir (str "/tmp/test-reconcile-merge-" (java.util.UUID/randomUUID))
+        conn (d/get-conn tmpdir db/schema)]
+    (try
+      (d/transact! conn
+                   [{:invoice/identifier "325043"
+                     :invoice/memo "Payment for Web Boost: TWIB 108 — debitcoinkoers.eu"
+                     :invoice/value 10000
+                     :invoice/settled true
+                     :invoice/settle_date "2026-06-13T13:34:50Z"}])
+      (let [order-id "od_bofDf6orSH"
+            fetched-order {:id order-id
+                           :currency "BTC"
+                           :totalAmount 10000
+                           :label "Web Boost: TWIB 108 — debitcoinkoers.eu"
+                           :metadata {:app "web-boost" :username "debitcoinkoers.eu"}}
+            complete-order (assoc fetched-order
+                                  :paidAt "2026-06-13T13:35:00Z"
+                                  :metadata (merge (:metadata fetched-order)
+                                                   {:podcastName "This Week in Bitcoin"
+                                                    :slug "twib"
+                                                    :episodeTitle "TWIB 108"
+                                                    :episodeGuid "guid-108"}))]
+        (testing "reconcile write + later normal Zaprite sync converge on ONE entity
+                  (probe-pinned; the unique zaprite_order_id is the merge point)"
+          (rec/sync-web-boost-reconcile!
+           conn "k"
+           {:allow-write? true
+            :fetch-pending (fn [_] [fetched-order])})
+          (d/transact! conn [(db/remove-empty-vals (zaprite/process-order complete-order))])
+          (let [entities (d/q '[:find [?e ...] :where [?e :boostagram/action "boost"]]
+                              (d/db conn))]
+            (is (= 1 (count entities)) "later sync must not create a second entity")
+            (let [ent (into {} (d/entity (d/db conn) (first entities)))]
+              (is (= (str "zaprite-" order-id) (:invoice/identifier ent))
+                  "identifier re-keys to zaprite-<id> (harmless; order-id still anchors)")
+              (is (= order-id (:boostagram/zaprite_order_id ent)))
+              (is (= 10000 (:boostagram/value_sat_total ent)))
+              (is (= "boost" (:boostagram/action ent)))
+              (is (= :sat (:boostagram/type ent)))
+              (is (= "Zaprite" (:boostagram/app_name ent)))))))
+      (finally
+        (d/close conn)
+        (test-utils/delete-dir-recursively (io/file tmpdir))))))
