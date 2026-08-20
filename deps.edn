@@ -2,10 +2,10 @@
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         datalevin/datalevin {:mvn/version "0.9.13"}
         cheshire/cheshire {:mvn/version "5.13.0"}
-         org.babashka/http-client {:mvn/version "0.4.22"}
-         com.cognitect.aws/s3 {:mvn/version "871.2.43.0"}
-         com.cognitect.aws/api {:mvn/version "0.8.723"}
-         com.cognitect.aws/endpoints {:mvn/version "871.2.46.0"}
+        org.babashka/http-client {:mvn/version "0.4.22"}
+        com.cognitect.aws/s3 {:mvn/version "871.2.43.0"}
+        com.cognitect.aws/api {:mvn/version "0.8.723"}
+        com.cognitect.aws/endpoints {:mvn/version "871.2.46.0"}
         aleph/aleph {:mvn/version "0.8.2"}
         metosin/reitit {:mvn/version "0.7.2"}
         metosin/muuntaja {:mvn/version "0.6.11"}
@@ -27,4 +27,6 @@
          :main-opts ["-m" "cognitect.test-runner"]
          :exec-fn cognitect.test-runner.api/test
          :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}}}
+                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}
+   ;; one-shot dry-run reconcile: clojure -M:jvm-base:reconcile
+  :reconcile {:main-opts ["-m" "boost-scraper.reconcile"]}}}

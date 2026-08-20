@@ -48,6 +48,16 @@
              :boostagram/payment_rail "card"
              :boostagram/value_sat_total 0})))))
 
+(deftest test-orders-query
+  (testing "uses single status param with repeated values, not array form"
+    (let [q (zaprite/orders-query nil 1)]
+      (is (= ["PAID" "COMPLETE" "OVERPAID"] (get q "status")))
+      (is (nil? (get q "status[]")))))
+  (testing "cursor adds paidAtMin"
+    (let [q (zaprite/orders-query "2026-08-01T00:00:00Z" 2)]
+      (is (= "2026-08-01T00:00:00Z" (get q "paidAtMin")))
+      (is (= "2" (get q "page"))))))
+
 (deftest test-infer-payment-rail
   (testing "lightning"
     (is (= "lightning" (zaprite/infer-payment-rail {:transactions [{:method "LIGHTNING"}]}))))

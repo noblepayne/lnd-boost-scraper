@@ -11,20 +11,29 @@
 
 (def zaprite-api-base "https://api.zaprite.com")
 
+(defn orders-query
+  "Query params for paid-status order fetching.
+
+   Zaprite ignores `status[]` array-form params (verified live 2026-08-19);
+   the single `status` param with repeated values is the correct form. The
+   array form was silently dropped, which meant this filter never applied and
+   the sync only worked by accident (paid orders happen to be the API default)."
+  [cursor page]
+  (merge {"status" ["PAID" "COMPLETE" "OVERPAID"]
+          "sortBy" "paidAt"
+          "sortOrder" "asc"
+          "page" (str page)}
+         (when cursor {"paidAtMin" cursor})))
+
 (defn fetch-orders
   "Fetch a page of paid Zaprite orders since cursor.
    Returns {:items [...] :meta {:page N :pagesCount N}} or nil."
   [api-key cursor page]
-  (let [query (merge {"status[]" ["PAID" "COMPLETE" "OVERPAID"]
-                      "sortBy" "paidAt"
-                      "sortOrder" "asc"
-                      "page" (str page)}
-                     (when cursor {"paidAtMin" cursor}))
-        url (str zaprite-api-base "/v1/orders")]
+  (let [url (str zaprite-api-base "/v1/orders")]
     (utils/with-retries
       (fn []
         (-> (http/get url {:headers {"Authorization" (str "Bearer " api-key)}
-                           :query-params query})
+                           :query-params (orders-query cursor page)})
             (utils/check-http-status "Zaprite")
             :body
             (json/parse-string true))))))
