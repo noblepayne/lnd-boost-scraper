@@ -66,31 +66,39 @@ c. **Creation-order tie-break** (`match-order-candidates`): when >1 PENDING cand
    creation-order index through (sortBy=createdAt, asc).
 
 d. **Safety (load-bearing)**: confidence is `:high` only when (i) exactly one candidate remains
-   after pairing math, or (ii) all candidates are **content-identical** (same normalized user +
-   episode + message — true for both live cases). Otherwise remain `:manual-review`. Rationale:
-   the anchor order-id is bookkeeping (later completion upsert-merges); content must never be
+   after pairing math, or (ii) all candidates are **content-identical** (normalized user + slug +
+   ep + sats + message — true for both live cases; note memphis candidates differ in display
+   case "memphis"/"Memphis", so compare normalized values, not raw metadata). Otherwise remain
+   `:manual-review`. Rationale: the anchor order-id is bookkeeping; content must never be
    guessed (Correction 2).
 
-Tests: pairing-rule unit tests (creation/paidAt gaps, 1:1 and N:1 cases), creation-order
-tie-break tests (memphis fixture: `od_bY1at35Vl9` must win), content-identity guard tests
-(including a content-divergent group that must stay manual), and regression: full fixture
-resolves to exactly 2 written + 6 already-boosted/false-positive.
+e. **Review amendments (2026-08-28, adopted)**:
+   - Pairing key = **normalized username + slug + ep + BTC amount + paidAt window** (username
+     and explicit `currency=BTC` added after review: same-show/same-amount COMPLETEs from other
+     users exist; non-BTC `totalAmount` is not sats).
+   - **Double-count risk defused**: a duplicate could only arise if a *dead twin* were picked as
+     anchor AND the true order later completed via normal sync. Empirically completion only
+     happens during the checkout session (all 240 observed paidAt within ~2min of settle — which
+     is exactly why orphans exist), and dead twins' invoices are canceled so they can never
+     complete. Accepted risk: near-zero; worst case one duplicate 2,222-sat row.
+   - **Unified fetch adopted**: one `sortBy=createdAt asc` pull (statuses PENDING/PAID/COMPLETE/
+     OVERPAID) replaces `fetch-pending-orders` for reconcile — gives pairing data (COMPLETEs
+     carry paidAt) AND creation order in a single coherent sequence, ~3 pages. The worker sync's
+     `fetch-orders` (paidAt cursor contract) is untouched.
+   - **§2 (worker memo-euid fix) cut from this plan** — orthogonal future work, own plan later.
+   - Tests named for the rule ("latest-created wins"), not the predicted outcome; memphis
+     fixture extended with creation-order signal (position in the delivered list).
 
-### 2. Web-boost worker fix (durable, future-proof)
+Tests: pairing-rule unit tests (creation/paidAt gaps, username/currency exclusion, 1:1 and N:1
+cases), creation-order tie-break tests (memphis fixture: latest-created must win), content-
+identity guard tests (including a content-divergent group that must stay manual), and
+regression: full fixture resolves to exactly 2 written + 6 already-boosted/false-positive.
 
-Embed the euid tail into the invoice memo at checkout time:
+### 2. ~~Web-boost worker fix~~ — CUT from this plan (2026-08-28 review)
 
-```
-Payment for Web Boost: LUP 670 — Memphis [euid:21957ee1-b11c-4849-b96b-579d644566ba:6310f9ee]
-```
-
-- Parser (`parse-web-boost-memo`) already tolerates suffixes (username is greedy remainder) —
-  needs a small extraction + a memo-stripping step so label matching stays clean.
-- Matcher upgrade: when an invoice carries an euid tail and exactly one candidate's full euid
-  matches (token + fingerprint), confidence is `:high` with exact anchoring. Kills the
-  ambiguity class permanently, including the memphis-style same-browser fingerprint cluster.
-- Deployment: worker-side change only; scraper picks it up automatically for *new* invoices.
-  Historic invoices stay unresolvable by this path (hence plan §1).
+Orthogonal future-proofing; deployable separately. Kept as a future candidate: embed the euid
+tail into the invoice memo at checkout (`Payment for Web Boost: LUP 670 — Memphis
+[euid:...]`) so matching becomes exact. Needs its own plan (parser memo-grammar change).
 
 ### 3. Resolution run (after §1 ships)
 
