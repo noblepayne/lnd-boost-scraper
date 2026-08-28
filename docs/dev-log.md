@@ -122,19 +122,23 @@ with the smallest surface that deploys cleanly; add loop only if orphans recur p
 - Remaining cleanup: flip `reconcileWrite = false` on next routine deploy; commit the box's
   `/etc/nixos` uncommitted state; manual-review rows documented below.
 
-## 2026-08-28 · Manual-review analysis (8 rows, 37,776 sats)
+## 2026-08-28 · Manual-review SOLVED (post-backfill live-data analysis)
 
-All 8 are the *retry pattern*: one person, page refreshes → multiple (label, amount)-identical
-order+invoice pairs, one attempt settles. Fingerprint clusters from live euids confirm (3 of 4
-Anonymous TWIB-108 orders share fp `b60e7803` = same browser). No LND-side field carries the euid
-tail, so exact matching is impossible by design today.
+Follow-up probing after the backfill changed the picture substantially:
 
-Cleanup tiers:
-1. Manual one-off transact with hand-picked anchors — low risk (content identical across
-   candidates; later Zaprite completion upsert-merges onto our entity, no dupe).
-2. **The real fix (web-boost worker)**: embed the euid tail (token:fingerprint) in the LND
-   invoice memo → matcher upgrades prefix-guard to exact-match, future cases auto-resolve. No
-   scraper change needed (parser already tolerates extra memo forms).
-3. Optional narrowing: the completed order per group is findable in Zaprite's COMPLETE list by
-   label; its `paidAt` vs the known settle times eliminates one invoice per group, but the
-   remainder stays unsplittable (order creation order is hidden).
+- **COMPLETE-order pairing**: a COMPLETE's `paidAt` lands ~5s–2min after its invoice's LND
+  settle (polling confirm). Pairing settle times against the 240 COMPLETE orders (all already
+  in the ledger) resolved **4 of the 8 manual-review rows as already-boosted false positives**
+  (mg101010 ×3, anon TWIB-108 22,222). True outstanding: **2 invoices × 2,222 = 4,444 sats**,
+  not 37,776.
+- **`sortBy=createdAt` works**: the API never returns a `createdAt` field, but accepts
+  `sortBy=createdAt` and orders results by it. PENDING creation order is extractable.
+  Sanity-checked: memphis `od_bY1at35Vl9` (pos 29) created before `od_vff0Bfkh8g` (pos 30) —
+  consistent with the phase-0 hypothesis that `od_vff0Bfkh8g` anchors settled invoice 342724
+  (attempt 1 canceled → attempt 2 settled).
+- **`expiresAt` is null** on all 10 stuck PENDINGs — they're not expiring, just dead retries.
+- Consequence: **full automated resolution is possible without dashboard access.** Plan
+  written: `docs/orphan-reconcile-phase5-plan.md` (matcher upgrade: pairing rule + creation-
+  order tie-break + content-identity guard; plus the durable worker fix — euid tail in the
+  invoice memo). Dashboard-access notes if the user obtains elevated access:
+  `docs/zaprite-access-notes.md`.
