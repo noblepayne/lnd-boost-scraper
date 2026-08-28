@@ -94,6 +94,57 @@ Response: `{"apps": [["Fountain", 68.95], ["Podverse", 7.82], ...]}`
 
 ---
 
+## Feed
+
+### Get Boosts
+
+`GET /api/v1/feed`
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `show` | string | yes | Show slug or regex (validated, ≤200 chars) |
+| `podcast` | string | no | Exact podcast name filter |
+| `since` | int | no | Epoch seconds — only boosts newer than this |
+| `before_time` | int | no | Cursor time (exclusive) — pagination |
+| `before_id` | string | no | Cursor identifier (≤256 chars) — pagination tie-break (preferred) |
+| `before_index` | int | no | Legacy cursor index — deprecated, use `before_id` |
+| `limit` | int | no | Max results (default 100, hard cap 200) |
+
+Pagination: `before_time` + `before_id` defines exclusive cursor `(time, identifier)` sorted `time DESC, identifier ASC`. Server dedups by `content_id` else `identifier`. For same `time`, `before_id` disambiguates (replaces legacy `before_index` which only worked for LND `add_index`).
+
+```bash
+# First page
+curl 'http://localhost:3223/api/v1/feed?show=lup&limit=5'
+# Next page using last item's time+identifier
+curl 'http://localhost:3223/api/v1/feed?show=lup&limit=5&before_time=1787750458&before_id=b-1'
+```
+
+Response: `[{"time": 1787750458, "sender": "wes", "sats": 1000, "app": "Fountain", "podcast": "LINUX Unplugged", "episode": "...", "message": "...", "index": 348800, "identifier": "348800", "content_id": "abc...", "fiat_cents": 0, "payment_rail": "", "fiat_currency": ""}, ...]`
+
+### Get Podcasts
+
+`GET /api/v1/feed/podcasts?show=lup`
+
+Returns `{"podcasts": ["LINUX Unplugged", ...]}` sorted.
+
+### CSV Export
+
+`GET /feed.csv?show=lup&podcast=...&since=...&end=...`
+
+Same filters as feed, no `limit` cap, deduped, sorted `time DESC, identifier ASC`. Returns `text/csv`.
+
+### WebSocket Live Feed
+
+`WS /ws/boosts` — subscribe to `boost-bus :boosts`. Each message is JSON from `ws/normalize-boost`:
+
+```json
+{"time": 1787750458, "sender": "wes", "sats": 1000, "app": "Fountain", "podcast": "...", "episode": "...", "message": "...", "identifier": "my-id", "content_id": "cid", "index": 123, "fiat_cents": 0, "payment_rail": "lightning", "fiat_currency": ""}
+```
+
+`identifier`/`content_id` are stable for client dedup (prefer over composite `time|sender|sats|podcast|message`). `index` is legacy LND `add_index`.
+
+---
+
 ## Raw Datalog Proxy
 
 For ad-hoc queries that don't have a dedicated endpoint.

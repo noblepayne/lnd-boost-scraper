@@ -341,6 +341,25 @@
           ?source_member]]
        (d/db conn) show-regex last-seen-timestamp))
 
+(defn- boost-sort-key
+  "Stable chronological key: epoch asc, identifier lexicographic tie-break.
+   Uses :invoice/creation_date (authoritative long) falling back to 0."
+  [b]
+  [(or (:invoice/creation_date b) 0)
+   (or (:invoice/identifier b) "")])
+
+(defn- compare-total-desc-mindate-asc [a b]
+  (let [c (compare (:total b) (:total a))]
+    (if (not= c 0) c (compare (:mindate a) (:mindate b)))))
+
+(defn- compare-mindate-asc-total-desc [a b]
+  (let [c (compare (:mindate a) (:mindate b))]
+    (if (not= c 0) c (compare (:total b) (:total a)))))
+
+(defn- compare-count-desc-mindate-asc [a b]
+  (let [c (compare (:count b) (:count a))]
+    (if (not= c 0) c (compare (:mindate a) (:mindate b)))))
+
 (defn sort-report
   [[ballers boosts thanks fiat-by-sender member-free-by-sender
     [boost_total_sats boost_total_boosts boost_total_boosters]
@@ -353,16 +372,22 @@
              :total total
              :count count
              :mindate mindate
-             :boosts (sort-by :invoice/created_at boosts)})
+             :boosts (sort-by boost-sort-key boosts)})
           (sort-fiat [[sender total count boosts]]
-            {:sender sender
-             :total total
-             :count count
-             :boosts (sort-by :invoice/created_at boosts)})
+            (let [sorted (sort-by boost-sort-key boosts)
+                  mindate (some->> sorted first :invoice/creation_date)]
+              {:sender sender
+               :total total
+               :count count
+               :mindate mindate
+               :boosts sorted}))
           (sort-free [[sender count boosts]]
-            {:sender sender
-             :count count
-             :boosts (sort-by :invoice/created_at boosts)})
+            (let [sorted (sort-by boost-sort-key boosts)
+                  mindate (some->> sorted first :invoice/creation_date)]
+              {:sender sender
+               :count count
+               :mindate mindate
+               :boosts sorted}))
           (merge-source-breakdown [sat-results fiat-results member-results]
             (let [sat-map (into {} (for [[src sats cnt] sat-results]
                                      [src {:sats (or sats 0) :count (or cnt 0)}]))
@@ -381,11 +406,11 @@
                       [src {:count (+ sat-cnt fi-cnt mem-cnt)
                             :sats sat
                             :fiat-cents fi-cents}]))))]
-    {:ballers (sort-by :total #(compare %2 %1) (map sort-boosts ballers))
-     :boosts (sort-by :mindate (map sort-boosts boosts))
-     :thanks (sort-by :mindate (map sort-boosts thanks))
-     :fiat-boosts (sort-by :total #(compare %2 %1) (map sort-fiat fiat-by-sender))
-     :member-free-boosts (sort-by :count #(compare %2 %1) (map sort-free member-free-by-sender))
+    {:ballers (sort compare-total-desc-mindate-asc (map sort-boosts ballers))
+     :boosts (sort compare-mindate-asc-total-desc (map sort-boosts boosts))
+     :thanks (sort compare-mindate-asc-total-desc (map sort-boosts thanks))
+     :fiat-boosts (sort compare-total-desc-mindate-asc (map sort-fiat fiat-by-sender))
+     :member-free-boosts (sort compare-count-desc-mindate-asc (map sort-free member-free-by-sender))
      :boost-summary {:boost_total_sats (or boost_total_sats 0)
                      :boost_total_boosts (or boost_total_boosts 0)
                      :boost_total_boosters (or boost_total_boosters 0)}
@@ -434,48 +459,38 @@
     nil))
 
 (defn format-boost-batch-details [boosts]
-  (let [best (best-metadata boosts)
-        others (if best
-                 (remove #(identical? % best) boosts)
-                 boosts)]
+  (let [sorted (sort-by boost-sort-key boosts)
+        best (best-metadata sorted)
+        header (let [{:keys [boostagram/podcast
+                             boostagram/episode
+                             boostagram/app_name
+                             boostagram/ts
+                             boostagram/time
+                             scraper/source]} best]
+                 (str
+                  (when podcast (str "+ " podcast "\n"))
+                  (when episode (str "+ " episode "\n"))
+                  (when app_name (str "+ " app_name "\n"))
+                  (when source (str "+ " source "\n"))
+                  (when (or ts time)
+                    (let [display-ts (or ts time)]
+                      (str "+ at " (if (string? display-ts) display-ts (utils/format-seconds display-ts)) "\n")))))]
     (str/join
      "\n"
      (concat
-      (let [{:keys [boostagram/message
-                    boostagram/podcast
-                    boostagram/episode
-                    boostagram/app_name
-                    boostagram/ts
-                    boostagram/time
-                    #_invoice/identifier
-                    invoice/creation_date
-                    scraper/source]} best]
-        [(str
-          (when podcast (str "+ " podcast "\n"))
-          (when episode (str "+ " episode "\n"))
-          (when app_name (str "+ " app_name "\n"))
-          (when source (str "+ " source "\n"))
-          (when (or ts time)
-            (let [display-ts (or ts time)]
-              (str "+ at " (if (string? display-ts) display-ts (utils/format-seconds display-ts)) "\n")))
-          "\n"
-          "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
-          "+ " (format-value-line best) "\n"
-          (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :(")))))])
+      (when (seq header) [header])
       (for [{:keys [boostagram/message boostagram/value_sat_total
                     invoice/creation_date
-                    #_invoice/identifier
                     boostagram/amount_fiat_cents
                     boostagram/amount_fiat_currency
-                    boostagram/payment_rail]} others]
-        (str "\n"
-             #_("+ " identifier "\n")
-             "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
-             "+ " (format-value-line {:boostagram/amount_fiat_cents amount_fiat_cents
-                                      :boostagram/amount_fiat_currency amount_fiat_currency
-                                      :boostagram/payment_rail payment_rail
-                                      :boostagram/value_sat_total value_sat_total}) "\n"
-             (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :("))))))))))
+                    boostagram/payment_rail]} sorted]
+        (str
+         "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
+         "+ " (format-value-line {:boostagram/amount_fiat_cents amount_fiat_cents
+                                  :boostagram/amount_fiat_currency amount_fiat_currency
+                                  :boostagram/payment_rail payment_rail
+                                  :boostagram/value_sat_total value_sat_total}) "\n"
+         (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :("))))))))))
 
 (defn format-boost-batch [{:keys [sender total count boosts]}]
   (str "### From: " sender "\n"

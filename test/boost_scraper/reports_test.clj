@@ -1374,4 +1374,135 @@
           (d/close conn)
           (test-utils/delete-dir-recursively (io/file tmpdir)))))))
 
+;; ============================================================================
+;; Date sorting: intra-booster chronological + inter-booster tie-break
+;; Spec: /tmp/report_spec.md — must fail before fix, pass after
+;; ============================================================================
 
+(deftest test-format-boost-batch-details-chronological
+  (testing "oldest first even when newer has richer metadata (best != oldest)"
+    (let [older {:boostagram/podcast "LINUX Unplugged"
+                 :boostagram/episode "681: Ain\u2019t Nothing But a Syncthing"
+                 :boostagram/app_name nil
+                 :boostagram/message "older message"
+                 :boostagram/value_sat_total 2222
+                 :invoice/creation_date 1787750266
+                 :invoice/identifier "b-old"
+                 :invoice/created_at (java.util.Date. (* 1787750266 1000))
+                 :scraper/source "nodecan"}
+          newer {:boostagram/podcast "LINUX Unplugged"
+                 :boostagram/episode "681: Ain\u2019t Nothing But a Syncthing"
+                 :boostagram/app_name "Fountain"
+                 :boostagram/ts 100
+                 :boostagram/message "newer richer message"
+                 :boostagram/value_sat_total 9001
+                 :invoice/creation_date 1787750458
+                 :invoice/identifier "b-new"
+                 :invoice/created_at (java.util.Date. (* 1787750458 1000))
+                 :scraper/source "nodecan"}
+          output (reports/format-boost-batch-details [newer older])]
+      (let [older-pos (.indexOf output "older message")
+            newer-pos (.indexOf output "newer richer message")]
+        (is (pos? older-pos) "older message must appear")
+        (is (pos? newer-pos) "newer message must appear")
+        (is (< older-pos newer-pos)
+            "oldest boost must render before newest even when newer is best-metadata")))))
+
+(deftest test-format-boost-batch-details-same-second-tie-break
+  (testing "same creation_date -> identifier lexicographic tie-break"
+    (let [a {:boostagram/podcast "LINUX Unplugged"
+             :boostagram/message "msg-a"
+             :boostagram/value_sat_total 100
+             :invoice/creation_date 1000
+             :invoice/identifier "a-1"
+             :invoice/created_at (java.util.Date. 1000000)
+             :scraper/source "lnd"}
+          b {:boostagram/podcast "LINUX Unplugged"
+             :boostagram/message "msg-b"
+             :boostagram/value_sat_total 200
+             :invoice/creation_date 1000
+             :invoice/identifier "b-1"
+             :invoice/created_at (java.util.Date. 1000000)
+             :scraper/source "lnd"}
+          output (reports/format-boost-batch-details [b a])]
+      (is (< (.indexOf output "msg-a") (.indexOf output "msg-b"))
+          "identifier a-1 must appear before b-1 when times tie"))))
+
+(deftest test-sort-report-member-free-chronological-tie-break
+  (testing "member-free with equal count sorted by earliest date asc"
+    (let [mk (fn [sender epoch id]
+               {:boostagram/sender_name_normalized sender
+                :boostagram/payment_rail "member-free"
+                :boostagram/podcast "LINUX Unplugged"
+                :boostagram/episode "681"
+                :boostagram/message (str sender " msg")
+                :invoice/creation_date epoch
+                :invoice/created_at (java.util.Date. (* epoch 1000))
+                :invoice/identifier id
+                :scraper/source "r2-member"})
+          free-monty (mk "monty" 1787582929 "m1")
+          free-paul (mk "paul" 1787593488 "p1")
+          free-aguy (mk "aguyfromvienna" 1787814941 "a1")
+          raw [[] [] [] []
+               [["monty" 1 [free-monty]]
+                ["aguyfromvienna" 1 [free-aguy]]
+                ["paul" 1 [free-paul]]]
+               [0 0 0] [0 0 0] [0 3 3] nil
+               [] [] []]
+          result (reports/sort-report raw)
+          order (mapv :sender (:member-free-boosts result))]
+      (is (= ["monty" "paul" "aguyfromvienna"] order)
+          "count tie -> earliest mindate first (Aug24 before Aug27)"))))
+
+(deftest test-sort-report-fiat-chronological-tie-break
+  (testing "fiat with equal total sorted by earliest date asc"
+    (let [mk (fn [sender total epoch id]
+               {:boostagram/sender_name_normalized sender
+                :boostagram/amount_fiat_cents total
+                :boostagram/amount_fiat_currency "USD"
+                :boostagram/payment_rail "card"
+                :boostagram/podcast "LINUX Unplugged"
+                :boostagram/episode "Ep"
+                :boostagram/message (str sender " fiat")
+                :invoice/creation_date epoch
+                :invoice/created_at (java.util.Date. (* epoch 1000))
+                :invoice/identifier id
+                :scraper/source "zaprite"})
+          fiat-a (mk "fiat-old" 1000 1000 "f1")
+          fiat-b (mk "fiat-new" 1000 2000 "f2")
+          raw [[] [] []
+               [["fiat-new" 1000 1 [fiat-b]]
+                ["fiat-old" 1000 1 [fiat-a]]]
+               []
+               [0 0 0] [0 0 0] [0 2 2] nil
+               [] [] []]
+          result (reports/sort-report raw)
+          order (mapv :sender (:fiat-boosts result))]
+      (is (= ["fiat-old" "fiat-new"] order)
+          "total tie -> earliest mindate first"))))
+
+(deftest test-sort-report-boosts-inter-sender-mindate
+  (testing "boosts sorted by mindate asc (oldest sender first)"
+    (let [mk (fn [sender total epoch id]
+               {:boostagram/sender_name_normalized sender
+                :boostagram/podcast "LINUX Unplugged"
+                :boostagram/episode "Ep"
+                :boostagram/app_name "Fountain"
+                :boostagram/message (str sender " msg")
+                :boostagram/value_sat_total total
+                :invoice/creation_date epoch
+                :invoice/created_at (java.util.Date. (* epoch 1000))
+                :invoice/identifier id
+                :scraper/source "lnd"})
+          b-old (mk "old-sender" 5000 1000 "o1")
+          b-new (mk "new-sender" 9000 2000 "n1")
+          raw [[]
+               [["new-sender" 9000 1 2000 [b-new]]
+                ["old-sender" 5000 1 1000 [b-old]]]
+               []
+               [] []
+               [0 0 0] [0 0 0] [0 0 0] nil
+               [] [] []]
+          result (reports/sort-report raw)
+          order (mapv :sender (:boosts result))]
+      (is (= ["old-sender" "new-sender"] order)))))

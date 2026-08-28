@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const podcastSelect = document.getElementById('filter-podcast');
   const showSelect = document.getElementById('filter-show');
   
-  let currentBefore = null; // {time: epoch, index: entity-index}
+  let currentBefore = null; // {time: epoch, id: identifier string}
   let isLoading = false;
   let ws = null;
   let reconnectDelay = 1000;
@@ -54,8 +54,11 @@ document.addEventListener('DOMContentLoaded', function() {
     return div.innerHTML;
   }
   
-  // Generate dedup key for a boost
+  // Generate dedup key for a boost — prefer stable identifier
   function boostKey(boost) {
+    if (boost.identifier) return boost.identifier;
+    if (boost.content_id) return boost.content_id;
+    if (boost.id) return boost.id;
     const sender = boost.sender || '';
     const sats = boost.sats || 0;
     const podcast = boost.podcast || '';
@@ -97,7 +100,7 @@ document.addEventListener('DOMContentLoaded', function() {
       cardType = 'member-free';
     } else if (fiatCents > 0) {
       const dollars = (fiatCents / 100).toFixed(2);
-      const rail = paymentRail || 'card';
+      const rail = escapeHtml(paymentRail || 'card');
       valueHtml = `<span class="boost-fiat">$${dollars}</span> <span class="boost-rail">(${rail})</span>`;
       cardType = 'fiat';
     } else if (sats > 0) {
@@ -265,8 +268,14 @@ document.addEventListener('DOMContentLoaded', function() {
     let url = `/api/v1/feed?show=${encodeURIComponent(show)}&limit=${limit}`;
     if (podcast) url += `&podcast=${encodeURIComponent(podcast)}`;
     if (since) url += `&since=${since}`;
-    if (before && before.time && before.index) {
-      url += `&before_time=${before.time}&before_index=${before.index}`;
+    if (before && before.time != null && (before.id != null || before.index != null)) {
+      const bid = before.id != null ? before.id : before.index;
+      // Prefer before_id (identifier string), fallback to before_index for legacy
+      if (typeof bid === 'string') {
+        url += `&before_time=${before.time}&before_id=${encodeURIComponent(bid)}`;
+      } else {
+        url += `&before_time=${before.time}&before_index=${before.index}`;
+      }
     }
     
     try {
@@ -277,6 +286,7 @@ document.addEventListener('DOMContentLoaded', function() {
       
       if (!append) {
         feedContainer.innerHTML = '';
+        seenBoosts.clear();
       }
       
       if (boosts.length === 0 && !append) {
@@ -296,10 +306,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (card) feedContainer.appendChild(card);
       });
       
-      // Update cursor for next page
+      // Update cursor for next page — use stable identifier
       if (boosts.length > 0) {
         const lastBoost = boosts[boosts.length - 1];
-        currentBefore = {time: lastBoost.time, index: lastBoost.index};
+        currentBefore = {time: lastBoost.time, id: lastBoost.identifier || lastBoost.content_id || lastBoost.index};
         loadMoreBtn.style.display = 'block';
       }
       
@@ -357,6 +367,7 @@ document.addEventListener('DOMContentLoaded', function() {
   if (podcastSelect) {
     podcastSelect.addEventListener('change', function() {
       currentBefore = null;
+      seenBoosts.clear();
       loadBoosts(null, false);
     });
   }

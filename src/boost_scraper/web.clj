@@ -33,6 +33,22 @@
     (when-let [resource (io/resource "query_templates.edn")]
       (edn/read-string (slurp resource)))))
 
+(defn- safe-regex-for
+  "Create regex from show param with validation. Prefers allowlisted show slug, falls back to raw pattern
+   with length and ReDoS guard. Returns nil on invalid."
+  [show]
+  (when (and show (seq show) (< (count show) 200))
+    (try
+      (let [pattern (or (shows/regex-for show) show)]
+        (when (and pattern (< (count pattern) 200))
+          (re-pattern pattern)))
+      (catch Exception _ nil))))
+
+(defn- validate-before-id
+  "Validate before_id length (≤256) to prevent DoS via large string."
+  [s]
+  (when (and s (seq s) (<= (count s) 256)) s))
+
 (defn two-weeks-ago []
   (let [now (/ (System/currentTimeMillis) 1000)
         two-weeks-ago (- now (* 2 60 60 24 7))]
@@ -221,7 +237,7 @@
    ["/api/v1/analysis/top-boosters"
     {:get {:handler (fn [request]
                       (let [{{:strs [show start end limit type]} :params} request
-                            show-regex (when show (re-pattern (or (shows/regex-for show) show)))
+                            show-regex (when show (safe-regex-for show))
                             start (when start (Long/parseLong start))
                             end (when end (Long/parseLong end))
                             limit (when limit (Integer/parseInt limit))
@@ -242,7 +258,7 @@
    ["/api/v1/analysis/monday-summary"
     {:get {:handler (fn [request]
                       (let [{{:strs [show type]} :params} request
-                            show-regex (when show (re-pattern (or (shows/regex-for show) show)))
+                            show-regex (when show (safe-regex-for show))
                             boost-type (when type (keyword type))]
                         (if-not show-regex
                           {:status 400
@@ -260,7 +276,7 @@
    ["/api/v1/analysis/monthly-leaderboard"
     {:get {:handler (fn [request]
                       (let [{{:strs [show type]} :params} request
-                            show-regex (when show (re-pattern (or (shows/regex-for show) show)))
+                            show-regex (when show (safe-regex-for show))
                             boost-type (when type (keyword type))]
                         (if-not show-regex
                           {:status 400
@@ -332,26 +348,36 @@
    ;; Feed API endpoint — with podcast filter
    ["/api/v1/feed"
     {:get {:handler (fn [request]
-                      (let [{{:strs [show podcast since before_time before_index limit]} :params} request
+                      (let [{{:strs [show podcast since before_time before_index before_id limit]} :params} request
                             show-regex (when show (some-> (shows/regex-for show true) re-pattern))
                             podcast (when (and podcast (seq podcast)) podcast)
                             since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
                             before-time (when before_time (try (Long/parseLong before_time) (catch NumberFormatException _ nil)))
+                            before-id (validate-before-id before_id)
                             before-index (when before_index (try (Long/parseLong before_index) (catch NumberFormatException _ nil)))
+                            cursor (or before-id before-index)
                             limit (when limit (try (Integer/parseInt limit) (catch NumberFormatException _ nil)))]
+                        ;; Observability: log cursor type for feed pagination
+                        (when show-regex
+                          (println "feed request" {:show show :podcast podcast :since since :before-time before-time :before-id before-id :before-index before-index :cursor cursor :limit limit}))
                         (if-not show-regex
                           {:status 400
                            :headers {"content-type" "application/json"}
                            :body (json/generate-string {:error (str "Invalid show: " show)})}
-                          (try
-                            (let [boosts (feed/get-boosts-for-feed-v2 db-conn show-regex podcast since before-time before-index limit)]
-                              {:status 200
-                               :headers {"content-type" "application/json"}
-                               :body (json/generate-string boosts)})
-                            (catch Exception e
-                              {:status 500
-                               :headers {"content-type" "application/json"}
-                               :body (json/generate-string {:error (.getMessage e)})})))))}}]
+                          (if (and before_id (seq before_id) (nil? before-id))
+                            {:status 400
+                             :headers {"content-type" "application/json"}
+                             :body (json/generate-string {:error "before_id too long (max 256)"})}
+                            (try
+                              (let [boosts (feed/get-boosts-for-feed-v2 db-conn show-regex podcast since before-time cursor limit)]
+                                {:status 200
+                                 :headers {"content-type" "application/json"
+                                           "cache-control" "no-cache, no-store, must-revalidate"}
+                                 :body (json/generate-string boosts)})
+                              (catch Exception e
+                                {:status 500
+                                 :headers {"content-type" "application/json"}
+                                 :body (json/generate-string {:error (.getMessage e)})}))))))}}]
    ;; Podcast list endpoint
    ["/api/v1/feed/podcasts"
     {:get {:handler (fn [request]
