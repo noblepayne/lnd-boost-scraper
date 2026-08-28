@@ -1401,12 +1401,10 @@
                  :invoice/created_at (java.util.Date. (* 1787750458 1000))
                  :scraper/source "nodecan"}
           output (reports/format-boost-batch-details [newer older])]
-      (let [older-pos (.indexOf output "older message")
-            newer-pos (.indexOf output "newer richer message")]
-        (is (pos? older-pos) "older message must appear")
-        (is (pos? newer-pos) "newer message must appear")
-        (is (< older-pos newer-pos)
-            "oldest boost must render before newest even when newer is best-metadata")))))
+      (is (pos? (.indexOf output "older message")) "older message must appear")
+      (is (pos? (.indexOf output "newer richer message")) "newer message must appear")
+      (is (< (.indexOf output "older message") (.indexOf output "newer richer message"))
+          "oldest boost must render before newest even when newer is best-metadata"))))
 
 (deftest test-format-boost-batch-details-same-second-tie-break
   (testing "same creation_date -> identifier lexicographic tie-break"
