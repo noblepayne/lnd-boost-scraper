@@ -20,15 +20,31 @@ settle (polling confirm). Groups:
 The PENDING candidates are not "expired" (`expiresAt: null` on all 10) — but most are dead
 retries that will never complete.
 
-## NEW discovery: creation order IS extractable
+## NEW discovery: creation order IS extractable — with two corrections
 
 Zaprite's API does not return a `createdAt` field, but **accepts `sortBy=createdAt`** and orders
-results by it (verified 2026-08-28). Sanity check: memphis `od_bY1at35Vl9` sorts before
-`od_vff0Bfkh8g` — consistent with the phase-0 hypothesis that the later-created
-`od_vff0Bfkh8g` anchors the settled invoice (attempt 1 → canceled invoice 342723; attempt 2 →
-settled 342724).
+results by it (verified 2026-08-28). A unified pull (`status=PENDING&status=PAID&status=COMPLETE
+&status=OVERPAID&sortBy=createdAt&sortOrder=asc`, 416 orders) interleaves PENDING and COMPLETE
+in true creation order.
 
-This unlocks **complete automated resolution** — no dashboard access required:
+**Correction 1 — phase-0 memphis hypothesis is likely WRONG.** In creation-asc order,
+`od_vff0Bfkh8g` (pos 326) was created BEFORE `od_bY1at35Vl9` (pos 327). If each checkout attempt
+creates one order + one invoice (attempt 1 → canceled 342723, attempt 2 → settled 342724), the
+settled invoice anchors to the *later* order = `od_bY1at35Vl9` — the opposite of the phase-0
+guess (which was explicitly unconfirmed).
+
+**Correction 2 — order/invoice creation is not always 1:1.** The anon TWIB-108 orphan invoice
+(323627, created 06-11 02:13:26) has NO PENDING order created near that time — the neighboring
+positions in creation order belong to other users. Nearest anon-2222 PENDING was created ~4.5h
+earlier. Per adevries17's own orphan message ("just keep refreshing the page and you can send it
+again"), refreshes may re-issue invoices on an *existing* order. Consequence: position analysis
+gives signal, not proof; the anchor for such invoices cannot always be pinned exactly.
+
+**Design consequence:** the load-bearing safety rule is **content-identity** — when all surviving
+candidates produce an identical boost (same user/episode/message), any anchor choice is
+bookkeeping-equivalent, and a later Zaprite completion upsert-merges onto our entity. The
+creation-order position is a deterministic *tie-break* (pick latest-created = the retry that
+likely settled), not a truth claim.
 
 ## Plan
 
@@ -44,18 +60,21 @@ b. **`already-boosted` pairing rule**: invoice is already-boosted if a COMPLETE 
    Clears the 4 false-positive rows with a test-lockable rule.
 
 c. **Creation-order tie-break** (`match-order-candidates`): when >1 PENDING candidate survives
-   the guards, and the group's COMPLETE pairing math implies exactly one invoice-unclaimed
-   anchor, pick the **latest-created** candidate (retry wins — the earlier attempt's invoice
-   canceled). Requires threading the creation-order index (from `sortBy=createdAt` page
-   position) through `fetch-pending-orders`. Promotes memphis + anon-2222 to HIGH.
+   the guards, use the **unified creation-ordered pull** (§ NEW discovery) and pick the
+   **latest-created** candidate (the retry that likely settled — see Correction 1; memphis
+   fixture must resolve to `od_bY1at35Vl9`). `fetch-pending-orders` must thread the
+   creation-order index through (sortBy=createdAt, asc).
 
-d. **Safety**: confidence stays `:high` only when (i) exactly one candidate remains after
-   pairing math, or (ii) all candidates are content-identical (same user/episode/message —
-   verified for both live cases). Otherwise remain `:manual-review`.
+d. **Safety (load-bearing)**: confidence is `:high` only when (i) exactly one candidate remains
+   after pairing math, or (ii) all candidates are **content-identical** (same normalized user +
+   episode + message — true for both live cases). Otherwise remain `:manual-review`. Rationale:
+   the anchor order-id is bookkeeping (later completion upsert-merges); content must never be
+   guessed (Correction 2).
 
-Tests: pairing-rule unit tests (settle/paidAt gaps, 1:1 and N:1 cases), creation-order
-tie-break tests (memphis fixture: `od_vff0Bfkh8g` must win), content-identity guard tests,
-and regression: full fixture resolves to exactly 2 written + 6 already-boosted/false-positive.
+Tests: pairing-rule unit tests (creation/paidAt gaps, 1:1 and N:1 cases), creation-order
+tie-break tests (memphis fixture: `od_bY1at35Vl9` must win), content-identity guard tests
+(including a content-divergent group that must stay manual), and regression: full fixture
+resolves to exactly 2 written + 6 already-boosted/false-positive.
 
 ### 2. Web-boost worker fix (durable, future-proof)
 
@@ -76,9 +95,12 @@ Payment for Web Boost: LUP 670 — Memphis [euid:21957ee1-b11c-4849-b96b-579d644
 ### 3. Resolution run (after §1 ships)
 
 1. Deploy upgraded matcher (routine flake update; write flag off).
-2. Preview → expect: manual-review drops to 0; orphans = 2 (memphis-invoice + anon invoice 2);
-   already-boosted includes the 6 cleared rows.
-3. Flip `reconcileWrite = true`, backfill, verify `/boosts` (+2 rows), flip back.
+2. Preview → expect: manual-review drops to 0; orphans = 2 (memphis-invoice 342724 + anon
+   invoice 323627); already-boosted includes the 6 cleared rows.
+3. Flip `reconcileWrite = true`, backfill, verify `/boosts` (+2 rows, +4,444 sats), flip back.
+
+Expected final anchors: memphis → `od_bY1at35Vl9` (creation-order tie-break); anon-2222 →
+latest-created surviving candidate (content-identical group, so any is equivalent).
 
 ## Out of scope / deferred
 
