@@ -1,6 +1,6 @@
 # Zaprite Orphan Reconciliation — Spec
 
-Status: ACTIVE — Phase 0 ✅ (2026-08-19, verified against live infra); Phase 1 ✅ (pure parser/matcher + tests); Phase 2 ✅ code + live-verified (query-form fix), prod dry-run = via Phase 3 preview route (the box has no checkout, so the `:reconcile` alias is dev-only); Phase 3 ✅ code + tests (2026-08-20, routes + write gate); Phase 4 ⏳ (deploy backfill on the box).
+Status: ACTIVE — Phase 0 ✅ (2026-08-19, verified against live infra); Phase 1 ✅ (pure parser/matcher + tests); Phase 2 ✅ code + live-verified (query-form fix), prod dry-run = via Phase 3 preview route (the box has no checkout, so the `:reconcile` alias is dev-only); Phase 3 ✅ code + tests (2026-08-20, routes + write gate); Phase 4 ✅ deployed + backfilled 2026-08-28 — **16 orphans written** (the 12-fixture prediction grew to 16 on first real prod run; see dev-log), 8 manual-review rows documented, idempotency verified, webhook fix confirmed live. Phase 5 (keep-fresh loop) deferred until an orphan recurs post-fix.
 Repo: lnd-boost-scraper
 Author context: investigation of a stuck Web Boost order (`od_nVJ3uLtbZz`, TWIB 118 — Adam Curry, 88,888 BTC) that settled in nodecan LND but never became a COMPLETE boost in the ledger.
 
@@ -333,29 +333,31 @@ reading `SCRAPER_UIPORT` at web.clj:483):
 Exit: field-parity + merge tests green; double-run creates no dups; `nix build .` + `nix flake
 check` green (modulo the pre-existing devenv devShell quirk).
 
-### Phase 4 — Backfill + verification
+### Phase 4 — Backfill + verification ✅ DONE (2026-08-28, see dev-log for the full record)
 1. Flake/nix rebuild with `reconcileWrite=true` → restart service.
-2. `GET /api/v1/reconcile/preview` on the box → confirms exactly the 13 orphans (12 HIGH +
-   memphis manual-review) before anything is written.
-3. `POST /api/v1/reconcile/backfill` → writes the 12 HIGH-confidence orphans. The memphis pair
-   (`od_bY1at35Vl9` / `od_vff0Bfkh8g`, both PENDING, no disconnectable field) is **not**
-   auto-written: operator picks `od_vff0Bfkh8g` per the order-id ordering hypothesis (§10) or
-   accepts it stays manual-review — a documented outcome, not a bug.
-4. Verify in reports/analysis that the 12 show as boosts under source "nodecan", amounts match,
+2. `GET /api/v1/reconcile/preview` on the box → confirms orphans before anything is written.
+3. `POST /api/v1/reconcile/backfill` → writes the HIGH-confidence orphans.
+4. Verify in reports/analysis that the writes show as boosts under source "nodecan", amounts match,
    no double-count with any Zaprite-side COMPLETE.
 5. (Out of scope per user decision 2026-08-19) Zaprite's own registry is **not** completed —
    the DB is the ledger. The `PATCH /v1/orders/{id}` endpoint exists (status→COMPLETE) but is
    not needed for acceptance and was explicitly deprioritized.
-Exit: 12 of 13 orphans visible in the show reports (memphis documented as manual-review /
-operator-resolved); repeated runs add zero new entities.
+**Prod outcome**: preview found **16 HIGH** (12 predicted + 4 same-class extras surfaced by the
+first real prod run) and **8 manual-review** (retry-pattern duplicates, documented in dev-log;
+cleanup tiers there). Backfill wrote all 16 (`written: 16`), idempotency re-run `already-boosted:
+16, orphans: 0`, all 16 verified in `/boosts`. Webhook fix on the box verified working (all
+post-fix webhooked payments → 200). Follow-up: flip `reconcileWrite=false` on next routine deploy.
 
 ### Phase 5 — Keep-fresh + monitoring (deferred; only if orphans recur post-fix)
-- If a future orphan appears after Phase 4 (the LNbits webhook fix is running, so likely rare),
-  wire `WEB_BOOST_RECONCILE_ENABLED` + a `reconcile-fut` in the scrape loop (core.clj, next to
-  `zaprite-fut` ~line 257) so `sync-web-boost-reconcile!` runs each cycle as defense-in-depth
-  (covers session-truncated checkout + webhook-dead window). Full sweep per cycle is cheap
-  (PENDING fetch = ~2 pages; invoice sweep is add_index-ordered) → **no window param** (dropped
-  2026-08-20 as premature optimization). The Phase 4 full-scan backfill is only ever run once.
+- Status as of 2026-08-28: the webhook fix is verified live (all post-fix webhooked payments →
+  200), so no new orphans are expected. If one does appear (checkout session dies before any
+  webhook fires — the residual gap), wire `WEB_BOOST_RECONCILE_ENABLED` + a `reconcile-fut` in
+  the scrape loop (core.clj, next to `zaprite-fut` ~line 257) so `sync-web-boost-reconcile!`
+  runs each cycle as defense-in-depth. Full sweep per cycle is cheap (PENDING fetch = ~2 pages;
+  invoice sweep is add_index-ordered) → **no window param** (dropped 2026-08-20 as premature
+  optimization). The Phase 4 full-scan backfill is only ever run once.
 - `GET /api/v1/reconcile/preview` doubles as the live status/monitoring endpoint.
+- Durable fix for the manual-review class lives in the **web-boost worker**: embed the euid tail
+  (token:fingerprint) into the LND invoice memo → exact-match resolution (dev-log 2026-08-28).
 Exit: scrape loop logs reconcile summary each cycle; a future orphan gets caught + ingested
 without manual intervention.

@@ -95,3 +95,46 @@ with the smallest surface that deploys cleanly; add loop only if orphans recur p
 - Full runbook in `docs/orphan-reconcile-phase4.md` (step 2 is a hard gate: abort if orphans ≠
   12 / manual-review ≠ 1 / sums disagree; unmatched ≥ 0 is normal — completed orders live in the
   ledger via the normal sync already).
+
+## 2026-08-28 · Phase 4 deployed + backfilled (prod)
+
+- **Deploy**: box config (`/etc/nixos` flake.nix) set `reconcileWrite = true`; flake input
+  updated input-only (`nix flake update lnd-boost-scraper`, 9d895cc → aa2bcaa on `v2-feed`).
+  Note: the box also pins `lnd-boost-scraper.url` to `github:noblepayne/lnd-boost-scraper/v2-feed`
+  (uncommitted there, along with the lnbits webhook patch in lnbits.nix).
+- **Preview gate deviation, decomposed and verified**: preview returned orphans 16 /
+  manual-review 8 / unmatched 101 — not the runbook's 12/1/≥0. The original 12 are all present
+  (sums reconcile exactly: 163,564 − 6,999 = 156,565 = predicted 12-writable sum). The 4 extras
+  are the same dead-webhook failure class that predates or postdates the Phase-0 probe: adevries17
+  (Jun 25), Anonymous ×2 (Jun 11/20), and the box owner's own "test boost 2" that settled 4
+  minutes *before* the webhook-fix restart. Root cause of the fixture gap: this was the first
+  real prod run of `detect-orphans` (Phase 2's prod dry-run was always deferred to this route).
+- **Webhook fix verified live**: running lnbits is the patched `lnbits-webhook-fixed` build
+  (`json=json.loads(payment.json())` at notifications.py:249), restarted Aug 19 14:29 PDT. All 5
+  webhooked payments since show `webhook_status=200`. The post-fix test boost (557 sats) went
+  COMPLETE normally and is correctly NOT an orphan — the fix works.
+- **Backfill executed**: `POST /backfill` → `written: 16, skipped: 0, manual-review: 8`.
+  Idempotency re-run: `orphans: 0, already-boosted: 16`. All 16 verified present in `/boosts`
+  (ballers bucket) with correct senders/sats/episodes. Report date-ordering fix (2953e19) also
+  verified: every sender batch renders chronologically.
+- **Backfill route test lesson (minor)**: with-redefs on the route's env helpers is required in
+  tests — the default fetcher hits real Zaprite otherwise (401 retries).
+- Remaining cleanup: flip `reconcileWrite = false` on next routine deploy; commit the box's
+  `/etc/nixos` uncommitted state; manual-review rows documented below.
+
+## 2026-08-28 · Manual-review analysis (8 rows, 37,776 sats)
+
+All 8 are the *retry pattern*: one person, page refreshes → multiple (label, amount)-identical
+order+invoice pairs, one attempt settles. Fingerprint clusters from live euids confirm (3 of 4
+Anonymous TWIB-108 orders share fp `b60e7803` = same browser). No LND-side field carries the euid
+tail, so exact matching is impossible by design today.
+
+Cleanup tiers:
+1. Manual one-off transact with hand-picked anchors — low risk (content identical across
+   candidates; later Zaprite completion upsert-merges onto our entity, no dupe).
+2. **The real fix (web-boost worker)**: embed the euid tail (token:fingerprint) in the LND
+   invoice memo → matcher upgrades prefix-guard to exact-match, future cases auto-resolve. No
+   scraper change needed (parser already tolerates extra memo forms).
+3. Optional narrowing: the completed order per group is findable in Zaprite's COMPLETE list by
+   label; its `paidAt` vs the known settle times eliminates one invoice per group, but the
+   remainder stays unsplittable (order creation order is hidden).
