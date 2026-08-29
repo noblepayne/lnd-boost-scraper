@@ -180,8 +180,8 @@ body {
 }
 
 .boost-time {
-  font-size: 0.75rem;
-  color: var(--text-muted);
+  font-size: 0.8rem;
+  color: #adb5bd;
 }
 
 .boost-amount {

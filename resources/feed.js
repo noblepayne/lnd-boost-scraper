@@ -46,6 +46,31 @@ document.addEventListener('DOMContentLoaded', function() {
     return date.toLocaleString();
   }
   
+  // Format compact absolute date+time for inline display
+  function formatAbsDateTime(epochSeconds) {
+    const date = new Date(epochSeconds * 1000);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    // Today: show time only
+    if (diffDays === 0) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    // Yesterday: "Yesterday 3:45 PM"
+    if (diffDays === 1) {
+      return 'Yesterday ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    // This year: "Aug 28, 3:45 PM"
+    if (date.getFullYear() === now.getFullYear()) {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
+             ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    // Older: "Aug 28, 2025 3:45 PM"
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + 
+           ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  
   // Escape HTML to prevent XSS
   function escapeHtml(text) {
     if (!text) return '';
@@ -125,7 +150,7 @@ document.addEventListener('DOMContentLoaded', function() {
     card.innerHTML = `
       <div class="boost-meta">
         <span class="boost-app">${escapeHtml(app)}</span>
-        <span class="boost-time" title="${formatFullDateTime(time)}">${formatRelativeTime(time)}</span>
+        <span class="boost-time" title="${formatFullDateTime(time)}">${formatRelativeTime(time)} · ${formatAbsDateTime(time)}</span>
       </div>
       <div class="boost-amount">${valueHtml}</div>
       <div class="boost-sender">from ${escapeHtml(sender)}</div>
