@@ -57,9 +57,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (diffDays === 0) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
-    // Yesterday: "Yesterday 3:45 PM"
+    // Yesterday: time only (relative already says "Yesterday")
     if (diffDays === 1) {
-      return 'Yesterday ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
     // This year: "Aug 28, 3:45 PM"
     if (date.getFullYear() === now.getFullYear()) {
