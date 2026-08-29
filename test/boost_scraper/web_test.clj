@@ -39,7 +39,7 @@
         (testing "preview returns detection and never writes (write flag on)"
           (with-redefs [web/zaprite-api-key (fn [] "k")
                         web/reconcile-write-enabled? (fn [] true)
-                        rec/fetch-pending-orders (fn [_] orders)]
+                        rec/fetch-unified-orders (fn [_] orders)]
             (let [resp (preview {})
                   body (json/parse-string (:body resp) true)]
               (is (= 200 (:status resp)))
@@ -49,14 +49,14 @@
         (testing "backfill is gated by the write flag"
           (with-redefs [web/zaprite-api-key (fn [] "k")
                         web/reconcile-write-enabled? (fn [] false)
-                        rec/fetch-pending-orders (fn [_] orders)]
+                        rec/fetch-unified-orders (fn [_] orders)]
             (let [resp (backfill {})]
               (is (= 403 (:status resp)))
               (is (zero? (count (boost-entities conn)))))))
         (testing "backfill with write flag on writes exactly the HIGH-confidence set"
           (with-redefs [web/zaprite-api-key (fn [] "k")
                         web/reconcile-write-enabled? (fn [] true)
-                        rec/fetch-pending-orders (fn [_] orders)]
+                        rec/fetch-unified-orders (fn [_] orders)]
             (let [resp (backfill {})
                   body (json/parse-string (:body resp) true)]
               (is (= 200 (:status resp)))
@@ -66,7 +66,7 @@
         (testing "backfill is idempotent across requests"
           (with-redefs [web/zaprite-api-key (fn [] "k")
                         web/reconcile-write-enabled? (fn [] true)
-                        rec/fetch-pending-orders (fn [_] orders)]
+                        rec/fetch-unified-orders (fn [_] orders)]
             (let [body (json/parse-string (:body (backfill {})) true)]
               (is (= 0 (:written body)))
               (is (= 1 (:skipped body)))

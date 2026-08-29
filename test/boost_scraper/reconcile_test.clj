@@ -34,6 +34,13 @@
     :label "Web Boost: LUP 670 — Memphis"
     :metadata {:app "web-boost" :username "Memphis"}}])
 
+(def memphis-orders-in-creation-order
+  "Same pair as memphis-orders, but listed in Zaprite creation order (asc) —
+   od_vff0Bfkh8g was created first (verified live 2026-08-28 via
+   sortBy=createdAt), so the later-created od_bY1at35Vl9 is the anchor when
+   the tie-break fires."
+  [(second memphis-orders) (first memphis-orders)])
+
 (deftest test-parse-web-boost-memo
   (testing "canonical LND memo with em dash"
     (is (= {:show-slug "twib" :show-ep "118" :username "Adam Curry"
@@ -116,7 +123,8 @@
         (is (= :none (:confidence result)))))
     (testing "euid guard passes -> high confidence"
       (is (= :high (:confidence (rec/match-order-candidates [euid-order] target))))))
-  (testing "memphis pair: identical euid prefix but distinct tails -> manual review"
+  (testing "memphis pair: identical euid prefix but distinct tails -> content-identical
+            pair resolves HIGH via tie-break (both candidates reported)"
     (let [pair (map (fn [o t]
                       (assoc o :externalUniqId
                              (str "web-boost:lup:7c961d88-db34-466f-a68a-37e39de64352"
@@ -124,8 +132,10 @@
                     memphis-orders ["token-a:fpr-a" "token-b:fpr-b"])
           target {:show-slug "lup" :show-ep "670" :username "memphis" :sats 2222}
           result (rec/match-order-candidates pair target)]
-      (is (= :manual-review (:confidence result)))
-      (is (= 2 (count (:candidates result)))))))
+      (is (= :high (:confidence result)))
+      (is (= 2 (count (:candidates result))))
+      (is (contains? (into #{} (map :id (:candidates result))) (:id (:order result)))
+          "chosen anchor is always among the reported candidates"))))
 
 (deftest test-match-order-candidates
   (let [target {:show-slug "twib" :show-ep "118" :username "adam curry" :sats 88888}]
@@ -149,9 +159,18 @@
       (let [wrong-show (assoc adam-order :label "Web Boost: LUP 999 — Adam Curry")
             result (rec/match-order-candidates [wrong-show] target)]
         (is (= :none (:confidence result))))))
-  (testing "duplicate-label pair (memphis) -> manual review, both candidates"
+  (testing "duplicate-label pair (memphis): content-identical -> high, latest-created anchor"
     (let [target {:show-slug "lup" :show-ep "670" :username "memphis" :sats 2222}
-          result (rec/match-order-candidates memphis-orders target)]
+          result (rec/match-order-candidates memphis-orders-in-creation-order target)]
+      (is (= :high (:confidence result)))
+      (is (= "od_bY1at35Vl9" (:id (:order result)))
+          "tie-break: the later-created retry anchors the settled invoice")
+      (is (= 2 (count (:candidates result))))))
+  (testing "content-divergent duplicate-label pair stays manual-review"
+    (let [target {:show-slug "lup" :show-ep "670" :username "memphis" :sats 2222}
+          divergent [(assoc-in (first memphis-orders) [:metadata :message] "one")
+                     (assoc-in (second memphis-orders) [:metadata :message] "two")]
+          result (rec/match-order-candidates divergent target)]
       (is (= :manual-review (:confidence result)))
       (is (nil? (:order result)))
       (is (= 2 (count (:candidates result))))))
@@ -369,24 +388,25 @@
     (testing "counts"
       (is (= 4 (:scanned result)))
       (is (= 1 (:already-boosted result)))
-      (is (= 1 (count (:orphans result))))
-      (is (= 1 (count (:manual-review result))))
+      (is (= 2 (count (:orphans result)))
+          "debitcoinkoers + memphis (content-identical tie-break promotes it)")
+      (is (= 0 (count (:manual-review result))))
       (is (= 1 (count (:unmatched result)))))
     (testing "sats accounting"
       (is (= 12345 (:total-sats-skipped result)))
       (is (= 13222 (:total-sats-orphaned result))))
     (testing "high-confidence orphan carries the ready entity"
-      (let [orphan (first (:orphans result))]
+      (let [orphan (first (filter #(= "325043" (:identifier %)) (:orphans result)))]
         (is (= "od_bofDf6orSH" (:order-id orphan)))
         (is (= 10000 (:sats orphan)))
         (is (= "twib" (:show-slug orphan)))
         (is (= "debitcoinkoers.eu" (:username orphan)))
         (is (some? (:entity orphan)))
         (is (= "325043" (:invoice/identifier (:entity orphan))))))
-    (testing "manual review carries both memphis candidates"
-      (let [review (first (:manual-review result))]
-        (is (= #{"od_bY1at35Vl9" "od_vff0Bfkh8g"}
-               (into #{} (:candidates review))))))
+    (testing "memphis resolves to the latest-created candidate in delivered order"
+      (let [orphan (first (filter #(= "342724" (:identifier %)) (:orphans result)))]
+        (is (= "od_vff0Bfkh8g" (:order-id orphan))
+            "fixture delivers vff0 last; creation-order comes from the fetcher")))
     (testing "unmatched carries the invoice"
       (is (= "440000" (:identifier (first (:unmatched result)))))))
   (testing "order already reconciled via zaprite_order_id is skipped"
@@ -452,7 +472,7 @@
                   (rec/sync-web-boost-reconcile!
                    conn "k"
                    {:allow-write? true
-                    :fetch-pending (fn [_] orders)
+                    :fetch-orders (fn [_] orders)
                     :broadcast-fn (fn [payload] (swap! broadcasts conj payload))}))]
         (let [r1 (run)]
           (testing "first run writes the high-confidence orphan"
@@ -516,7 +536,7 @@
           (rec/sync-web-boost-reconcile!
            conn "k"
            {:allow-write? true
-            :fetch-pending (fn [_] [fetched-order])})
+            :fetch-orders (fn [_] [fetched-order])})
           (d/transact! conn [(db/remove-empty-vals (zaprite/process-order complete-order))])
           (let [entities (d/q '[:find [?e ...] :where [?e :boostagram/action "boost"]]
                               (d/db conn))]
@@ -532,3 +552,111 @@
       (finally
         (d/close conn)
         (test-utils/delete-dir-recursively (io/file tmpdir))))))
+
+;; ============================================================================
+;; Phase 5 matcher upgrade: unified fetch, COMPLETE-pairing rule,
+;; content-identity guard + latest-created tie-break
+;; ============================================================================
+
+(deftest test-unified-orders-query
+  (testing "all statuses, creation-ascending (vector value renders as repeated status params)"
+    (let [q (rec/unified-orders-query 2)]
+      (is (= "2" (get q "page")))
+      (is (= "createdAt" (get q "sortBy")))
+      (is (= "asc" (get q "sortOrder")))
+      (is (nil? (get q "status[]")))
+      (is (= ["PENDING" "PAID" "COMPLETE" "OVERPAID"] (get q "status"))))))
+
+(deftest test-pair-with-complete
+  (let [paid-at "2026-08-07T02:41:12Z"
+        ;; creation derived at runtime: 35s before paidAt (observed live gaps ~5s-2min)
+        invoice {:invoice/identifier "342724"
+                 :invoice/memo "Payment for Web Boost: LUP 670 — Memphis"
+                 :invoice/value 2222
+                 :invoice/creation_date (- (.getEpochSecond (rec/parse-rfc3339 paid-at)) 35)}
+        complete {:id "od_trueAnchor"
+                  :status "COMPLETE"
+                  :currency "BTC"
+                  :totalAmount 2222
+                  :paidAt paid-at
+                  :label "Web Boost: LUP 670 — Memphis"
+                  :metadata {:app "web-boost" :username "Memphis"}}
+        ;;; pairing key from the invoice
+        target (rec/invoice-pairing-target invoice)]
+    (testing "pairing target extraction"
+      (is (= {:username "memphis" :show-slug "lup" :show-ep "670" :sats 2222
+              :creation-epoch (:invoice/creation_date invoice)}
+             target)))
+    (testing "matching complete within window pairs"
+      (is (true? (rec/pairs-with-complete? complete target))))
+    (testing "paidAt just outside the window does not pair"
+      (let [far (assoc complete :paidAt "2026-08-07T02:55:00Z")]
+        (is (false? (rec/pairs-with-complete? far target)))))
+    (testing "username mismatch does not pair (same show/amount, other user)"
+      (let [other (assoc-in complete [:metadata :username] "SomeoneElse")]
+        (is (false? (rec/pairs-with-complete? other target)))))
+    (testing "amount mismatch does not pair"
+      (is (false? (rec/pairs-with-complete? (assoc complete :totalAmount 9999) target))))
+    (testing "non-BTC never pairs (fiat totalAmount is not sats)"
+      (is (false? (rec/pairs-with-complete?
+                   (assoc complete :currency "USD" :totalAmount 2222) target))))
+    (testing "PENDING order never pairs (no paidAt)"
+      (is (false? (rec/pairs-with-complete? (dissoc complete :paidAt) target))))))
+
+(deftest test-content-identity-and-tie-break
+  (let [target {:show-slug "lup" :show-ep "670" :username "memphis" :sats 2222}]
+    (testing "content-identical candidates + creation order -> high, latest-created wins"
+      (let [result (rec/match-order-candidates memphis-orders-in-creation-order target)]
+        (is (= :high (:confidence result)))
+        (is (= "od_bY1at35Vl9" (:id (:order result)))
+            "the later-created retry is the anchor (live-verified creation order)")))
+    (testing "content-divergent candidates stay manual-review even with creation order"
+      (let [divergent [(assoc-in (first memphis-orders) [:metadata :message] "hi")
+                       (assoc-in (second memphis-orders) [:metadata :message] "bye")]]
+        (is (= :manual-review (:confidence (rec/match-order-candidates divergent target))))))
+    (testing "divergent display-case usernames are still content-identical (normalized)"
+      (is (= :high (:confidence (rec/match-order-candidates memphis-orders target)))
+          "fixture order (no position dependency) still resolves via normalized identity"))))
+
+(deftest test-detect-orphans-with-pairing
+  (testing "invoice pairing with a COMPLETE order is already-boosted even though
+            the invoice entity itself was never enriched"
+    (let [invoices [{:invoice/identifier "328995"
+                     :invoice/memo "Payment for Web Boost: LUP 671 — mg101010"
+                     :invoice/value 2222
+                     ;; creation derived at runtime: 183s before the COMPLETE paidAt
+                     ;; (observed live: paidAt lands ~2min after invoice creation)
+                     :invoice/creation_date (- (.getEpochSecond (rec/parse-rfc3339 "2026-06-28T13:21:32Z")) 183)}
+                    {:invoice/identifier "342724"
+                     :invoice/memo "Payment for Web Boost: LUP 670 — Memphis"
+                     :invoice/value 2222
+                     :invoice/creation_date (-> (rec/parse-rfc3339 "2026-08-07T02:40:37Z")
+                                                (.getEpochSecond))}]
+          orders [{:id "od_completed"
+                   :status "COMPLETE"
+                   :currency "BTC"
+                   :totalAmount 2222
+                   :paidAt "2026-06-28T13:21:32Z"
+                   :label "Web Boost: LUP 671 — mg101010"
+                   :metadata {:app "web-boost" :username "mg101010"}}
+                  {:id "od_vff0Bfkh8g"
+                   :status "PENDING"
+                   :currency "BTC"
+                   :totalAmount 2222
+                   :label "Web Boost: LUP 670 — Memphis"
+                   :metadata {:app "web-boost" :username "Memphis"}}
+                  {:id "od_bY1at35Vl9"
+                   :status "PENDING"
+                   :currency "BTC"
+                   :totalAmount 2222
+                   :label "Web Boost: LUP 670 — Memphis"
+                   :metadata {:app "web-boost" :username "memphis"}}]
+          result (rec/detect-orphans invoices orders {:identifiers #{} :order-ids #{}})]
+      (is (= 1 (:already-boosted result))
+          "mg101010 invoice pairs with its COMPLETE (2min gap) -> already-boosted")
+      (is (= 1 (count (:orphans result)))
+          "memphis resolves via content-identity + latest-created tie-break")
+      (is (= "od_bY1at35Vl9" (-> result :orphans first :order-id)))
+      (is (empty? (:manual-review result)))
+      (is (= 2222 (:total-sats-orphaned result))
+          "orphan bucket only — the paired invoice is excluded"))))

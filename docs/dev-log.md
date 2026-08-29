@@ -7,6 +7,40 @@ Format: date · decision · why.
 
 ---
 
+## 2026-08-28 · Phase 5 matcher upgrade built (tests first, review-amended)
+
+- **Plan** (`docs/orphan-reconcile-phase5-plan.md`) went through an agent design review
+  (verdict BUILD AS AMENDED). Amendments adopted:
+  - Pairing key gains **normalized username + explicit BTC currency** (same-show/same-amount
+    COMPLETEs from other users exist; fiat totalAmount is not sats).
+  - Tie-break reframed honestly: it's a **deterministic bookkeeping pick**, and the
+    double-count risk was defused analytically — a duplicate would require a dead twin to be
+    picked AND the true order to later complete, but completion only happens during the
+    checkout session (all 240 observed paidAt within ~2min of settle — which is exactly why
+    orphans exist) and dead twins' invoices are canceled so they can never complete.
+  - **Unified fetch adopted**: `fetch-unified-orders` (sortBy=createdAt asc, statuses
+    PENDING/PAID/COMPLETE/OVERPAID) replaces the PENDING-only fetch for reconcile — one pull
+    gives the pairing data AND creation-order tie-break signal. The worker sync's
+    `fetch-orders` paidAt-cursor contract is untouched.
+  - **Worker memo-euid fix cut** from the plan (orthogonal, future work).
+- **Two live-data corrections recorded** (§ NEW discovery in the plan): the phase-0 memphis
+  hypothesis is likely flipped (`od_bY1at35Vl9` is the later-created, so the likely anchor),
+  and order/invoice creation is not always 1:1 — so creation-order position is a tie-break,
+  not a truth claim. The **content-identity guard is the load-bearing safety rule**.
+- **Tests rewritten to be self-deriving** (per Wes: adaptive, generative-inspired): fixture
+  timestamps are *computed at runtime* (e.g. creation = paidAt − 35s) instead of hand-baked
+  epoch literals — three separate failures from my own hand-computed epochs proved the point.
+  Tests are named for the rule ("latest-created wins"), not the predicted outcome.
+- Implementation: `unified-orders-query` / `fetch-unified-orders` (vector `status` value —
+  babashka renders it as repeated single params, same as the proven paid-sync query),
+  `invoice-pairing-target`, `pairs-with-complete?` (600s window), `content-identical?`,
+  tie-break `{:confidence :high :order (last cands)}` in `match-order-candidates`,
+  pairing-or-dedup in `detect-orphans`' skip check. `sync-web-boost-reconcile!` injection
+  key renamed `:fetch-pending` → `:fetch-orders`.
+- Live validation: run through the **deployed preview route** after the next box rebuild
+  (read-only by construction, live DB + live Zaprite — strictly better than a local snapshot
+  copy, which was attempted and abandoned: 3.2 GB pull, redundant, torn-copy risk).
+
 ## 2026-08-19 · Investigation
 
 - **Root cause**: Web Boost checkout settles a BOLT-11 invoice on nodecan LND; Zaprite marks the

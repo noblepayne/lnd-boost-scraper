@@ -9,7 +9,7 @@
    3. find-web-boost-invoices /
       find-boosted-keys                — Datalevin reads (tested with
                                           in-memory conns)
-   4. fetch-pending-orders             — Zaprite HTTP (thin, mirrors
+   4. fetch-unified-orders             — Zaprite HTTP (thin; creation-asc,
                                           upstream.zaprite), pageable fetcher
                                           `fetch-pending-orders*` is injected
                                           and unit-tested"
@@ -109,6 +109,20 @@
          (= (parse-long-or-nil (:amount parts)) (:sats target)))
     true))
 
+(defn- content-identical?
+  "True when every candidate produces an identical boost: same normalized
+   username, slug, ep, sats, and message. Display-case differences (memphis vs
+   Memphis) do not break identity — usernames are normalized. Message is
+   compared normalized so whitespace/case variance cannot split a group."
+  [target cands]
+  (let [f (fn [o]
+            [(candidate-id o)
+             (:show-slug target)
+             (:show-ep target)
+             (:sats target)
+             (db/normalize-name (str (get-in o [:metadata :message])))])]
+    (apply = (map f cands))))
+
 (defn match-order-candidates
   "Across Zaprite orders, find web-boost candidates for a settled invoice.
 
@@ -122,8 +136,16 @@
 
    Returns {:confidence :high | :manual-review | :none
             :order best-order-or-nil
-            :candidates [orders]} — :manual-review when more than one
-   candidate qualifies (e.g. the memphis dup-label pair)."
+            :candidates [orders]}.
+
+   Multiple candidates (retry-pattern duplicate label+amount): HIGH when all
+   candidates are content-identical — the anchor is then deterministic
+   bookkeeping (later Zaprite completion upsert-merges via the unique
+   zaprite_order_id) — and the tie-break picks the LAST candidate in the
+   delivered order. The reconcile fetcher delivers orders creation-ascending
+   (sortBy=createdAt, verified live), so the latest-created retry wins, which
+   live-data analysis says is the settled invoice's true anchor. Candidates
+   that differ in content stay :manual-review — content is never guessed."
   [orders target]
   (let [username (db/normalize-name (:username target))
         cands (into []
@@ -142,7 +164,9 @@
     (case (count cands)
       0 {:confidence :none :order nil :candidates []}
       1 {:confidence :high :order (first cands) :candidates cands}
-      {:confidence :manual-review :order nil :candidates cands})))
+      (if (content-identical? target cands)
+        {:confidence :high :order (last cands) :candidates cands}
+        {:confidence :manual-review :order nil :candidates cands}))))
 
 (defn parse-rfc3339
   "Parse an RFC3339 timestamp string to an Instant, or nil."
@@ -280,18 +304,90 @@
             (recur (inc page) (into acc items))
             (into acc items)))))))
 
-(defn pending-orders-query
-  "Query params for the PENDING filter.
+(def unified-statuses ["PENDING" "PAID" "COMPLETE" "OVERPAID"])
 
-   Zaprite ignores `status[]` (array-form) — verified live 2026-08-19: the
-   param is silently dropped and the API returns the unfiltered default set
-   (all COMPLETE+UNDERPAID). The single `status` param is the correct form."
+(defn unified-orders-query
+  "Query params for the reconcile fetch: all relevant statuses (one `status`
+   param per value — the array form is ignored), creation-ascending so the
+   returned sequence carries creation-order signal (sortBy=createdAt is
+   undocumented but honored by the API — verified live 2026-08-28). COMPLETE
+   items carry paidAt, giving the pairing rule its anchor times in one pull."
+  [page]
+  {"status" unified-statuses
+   "sortBy" "createdAt"
+   "sortOrder" "asc"
+   "page" (str page)})
+
+(defn fetch-unified-orders
+  "Fetch all reconcile-relevant Zaprite orders (all pages), creation-ascending.
+   Replaces the PENDING-only fetch for reconcile: one pull yields both the
+   pairing data and the creation-order tie-break signal."
+  [api-key]
+  (fetch-pending-orders*
+   (fn [key page]
+     (utils/with-retries
+       (fn []
+         (-> (http/get (str zaprite/zaprite-api-base "/v1/orders")
+                       {:headers {"Authorization" (str "Bearer " key)}
+                        :query-params (unified-orders-query page)})
+             (utils/check-http-status "Zaprite")
+             :body
+             (json/parse-string true)))))
+   api-key))
+
+(def pairing-window-seconds
+  "Max gap between invoice creation and COMPLETE paidAt for the pairing rule.
+   Observed gaps are ~5s-2min (polling confirm); 10min is generous but bounded."
+  600)
+
+(defn invoice-pairing-target
+  "Extract the pairing key from a settled web-boost invoice:
+   normalized username, slug, ep, sats, creation epoch."
+  [invoice]
+  (let [parsed (parse-web-boost-memo (:invoice/memo invoice))
+        sats (coerce-sats (:invoice/value invoice))]
+    (when (and parsed sats (:invoice/creation_date invoice))
+      {:username (db/normalize-name (:username parsed))
+       :show-slug (:show-slug parsed)
+       :show-ep (:show-ep parsed)
+       :sats sats
+       :creation-epoch (:invoice/creation_date invoice)})))
+
+(defn pairs-with-complete?
+  "COMPLETE-pairing rule: an invoice is already-boosted when a COMPLETE order
+   exists with the same normalized username, slug+ep, BTC sats, and a paidAt
+   within the pairing window of the invoice's creation. Zaprite marks COMPLETE
+   only after its polling observes settlement, so paidAt lands seconds-to-
+   minutes after the invoice's creation-time (observed ~5s-2min live).
+   Username is load-bearing: same-show/same-amount COMPLETEs from other users
+   exist. Non-BTC never pairs (fiat totalAmount is not sats)."
+  [{:keys [status currency paidAt] :as order}
+   {:keys [username show-slug show-ep sats creation-epoch] :as _target}]
+  (boolean
+   (and (= "COMPLETE" status)
+        (= "BTC" currency)
+        paidAt
+        (= sats (order-sats order))
+        (= username (candidate-id order))
+        (when-let [par (parse-web-boost-memo (str (:label order)))]
+          (and (= show-slug (:show-slug par))
+               (= show-ep (:show-ep par))))
+        (when-let [paid (parse-rfc3339 paidAt)]
+          (let [gap (- (.getEpochSecond paid) creation-epoch)]
+            (and (pos? gap) (<= gap pairing-window-seconds)))))))
+
+(defn pending-orders-query
+  "Legacy single-status PENDING filter. Superseded by unified-orders-query for
+   reconcile; kept because `status=PENDING` + page params remain the minimal
+   correct form (the array `status[]` variant is silently ignored by the API)."
   [page]
   {"status" "PENDING"
    "page" (str page)})
 
 (defn fetch-pending-orders
-  "Fetch all PENDING Zaprite orders (all pages, status=PENDING only)."
+  "Fetch all PENDING Zaprite orders (all pages, status=PENDING only).
+   Superseded by fetch-unified-orders for reconcile; retained for callers
+   that genuinely want the PENDING-only view."
   [api-key]
   (fetch-pending-orders*
    (fn [key page]
@@ -330,17 +426,17 @@
 
 (defn detect-orphans
   "Core detection (pure). Classify each settled web-boost invoice against the
-   pending Zaprite orders.
+   reconcile order set (creation-ascending; PENDING + COMPLETE etc).
 
    invoices :: seq of invoice maps (see find-web-boost-invoices)
-   orders   :: seq of pending Zaprite orders
+   orders   :: seq of Zaprite orders (fetch-unified-orders; status-bearing)
    boosted  :: {:identifiers #{id} :order-ids #{order-id}} from find-boosted-keys
 
    Returns
    {:scanned N
-    :already-boosted N          ;; skipped via dedup guard
+    :already-boosted N          ;; skipped via dedup guard OR COMPLETE-pairing rule
     :orphans [...]              ;; high-confidence: order matched + entity ready
-    :manual-review [...]        ;; duplicate-label candidates (e.g. memphis)
+    :manual-review [...]        ;; candidates exist but content diverges
     :unmatched [...]            ;; settled web-boost, no matching order
     :total-sats-skipped N
     :total-sats-orphaned N}     ;; sats in the three non-skipped buckets"
@@ -361,12 +457,15 @@
               sats (coerce-sats (:invoice/value invoice))
               sats' (or sats 0)
               parsed (parse-web-boost-memo memo)
+              pairing-target (invoice-pairing-target invoice)
               result (if parsed
                        (match-order-candidates orders (assoc parsed :sats sats'))
                        {:confidence :none})
               order-id (some-> (:order result) :id)
               dedup (or (contains? boosted-ids id)
-                        (and order-id (contains? boosted-oids order-id)))]
+                        (and order-id (contains? boosted-oids order-id))
+                        (and pairing-target
+                             (boolean (some #(pairs-with-complete? % pairing-target) orders))))]
           (cond
             dedup (recur (rest remaining) (inc scanned) (inc skipped)
                          orphans review unmatched
@@ -416,9 +515,9 @@
    api-key  :: Zaprite API key
    opts     :: {:allow-write? bool  — when true, d/transact! each HIGH-confidence
                                   :entity and broadcast it (default false)
-                :fetch-pending f    — injectable pending-orders fetcher,
+                :fetch-orders f      — injectable unified-orders fetcher,
                                   arity [api-key] → orders (default
-                                  fetch-pending-orders; inject to avoid HTTP)
+                                  fetch-unified-orders; inject to avoid HTTP)
                 :broadcast-fn f     — injectable WebSocket broadcaster, arity
                                   [entity] (default no-op; the web suite passes
                                   ws/broadcast! so live clients see the write)}
@@ -429,8 +528,8 @@
    a second call (or a crashed-backfill restart) writes nothing new."
   ([conn api-key]
    (sync-web-boost-reconcile! conn api-key {}))
-  ([conn api-key {:keys [allow-write? fetch-pending broadcast-fn]}]
-   (let [fetcher (or fetch-pending fetch-pending-orders)
+  ([conn api-key {:keys [allow-write? fetch-orders broadcast-fn]}]
+   (let [fetcher (or fetch-orders fetch-unified-orders)
          broadcast (or broadcast-fn (fn [_] nil))
          detection (detect-orphans (find-web-boost-invoices conn)
                                    (fetcher api-key)
@@ -512,7 +611,7 @@
       (let [conn (d/get-conn dbi db/schema)]
         (try
           (let [detection (detect-orphans (find-web-boost-invoices conn)
-                                          (fetch-pending-orders api-key)
+                                          (fetch-unified-orders api-key)
                                           (find-boosted-keys conn))
                 report-path (write-report! out-dir detection)]
             (println (reconcile-report detection))
