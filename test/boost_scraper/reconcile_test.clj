@@ -603,6 +603,75 @@
     (testing "PENDING order never pairs (no paidAt)"
       (is (false? (rec/pairs-with-complete? (dissoc complete :paidAt) target))))))
 
+(deftest test-pairs-with-complete-fiat-blindspot
+  (testing "fiat order paid via lightning pairs via its BTC transaction
+            (the 2026-08-29 blindspot fix: 4 invoices / 415,156 sats were
+            falsely unmatched because pairing required currency==BTC)"
+    (let [invoice {:invoice/identifier "343910"
+                   :invoice/memo "Payment for Web Boost: TWIB 117 — Satsquatch"
+                   :invoice/value 312088
+                   ;; creation derived: 90s before the observed paidAt
+                   :invoice/creation_date (- (.getEpochSecond (rec/parse-rfc3339 "2026-08-11T03:45:48Z")) 90)}
+          ;; live shape: Satsquatch's USD 20000 fiat order, LIGHTNING tx 312088 sats
+          fiat-order {:id "od_IWKdVdodZ8"
+                      :status "COMPLETE"
+                      :currency "USD"
+                      :totalAmount 20000
+                      :paidAt "2026-08-11T03:45:48Z"
+                      :label "Web Boost: TWIB 117 — Satsquatch"
+                      :metadata {:app "web-boost" :username "Satsquatch"}
+                      :transactions [{:method "LIGHTNING" :status "CONFIRMED"
+                                      :amount 312088 :currency "BTC"}]}
+          target (rec/invoice-pairing-target invoice)]
+      (is (= 312088 (rec/order-tx-sats fiat-order)) "tx sats extracted from fiat order")
+      (is (true? (rec/pairs-with-complete? fiat-order target))
+          "same payment despite fiat order currency")))
+  (testing "fiat order paid via CARD never pairs (no BTC tx — sats never touched nodecan)"
+    (let [invoice {:invoice/identifier "123456"
+                   :invoice/memo "Payment for Web Boost: TWIB 110 — Someone"
+                   :invoice/value 5000
+                   :invoice/creation_date (- (.getEpochSecond (rec/parse-rfc3339 "2026-07-01T00:05:00Z")) 60)}
+          card-order {:id "od_card"
+                      :status "COMPLETE"
+                      :currency "USD"
+                      :totalAmount 500
+                      :paidAt "2026-07-01T00:05:00Z"
+                      :label "Web Boost: TWIB 110 — Someone"
+                      :metadata {:app "web-boost" :username "Someone"}
+                      :transactions [{:method "CARD" :status "CONFIRMED"
+                                      :amount 500 :currency "USD"}]}]
+      (is (nil? (rec/order-tx-sats card-order)))
+      (is (false? (rec/pairs-with-complete? card-order (rec/invoice-pairing-target invoice))))))
+  (testing "unconfirmed BTC tx does not pair"
+    (let [invoice {:invoice/identifier "x"
+                   :invoice/memo "Payment for Web Boost: TWIB 110 — Someone"
+                   :invoice/value 5000
+                   :invoice/creation_date 0}
+          pending-tx {:id "od_x" :status "COMPLETE" :currency "USD" :totalAmount 500
+                      :paidAt "1970-01-01T00:09:00Z"
+                      :label "Web Boost: TWIB 110 — Someone"
+                      :metadata {:app "web-boost" :username "Someone"}
+                      :transactions [{:method "LIGHTNING" :status "PENDING"
+                                      :amount 5000 :currency "BTC"}]}]
+      (is (nil? (rec/order-tx-sats pending-tx)))
+      (is (false? (rec/pairs-with-complete? pending-tx (rec/invoice-pairing-target invoice))))))
+  (testing "BTC-order pairing behavior unchanged by the tx extension"
+    (let [invoice {:invoice/identifier "342724"
+                   :invoice/memo "Payment for Web Boost: LUP 670 — Memphis"
+                   :invoice/value 2222
+                   :invoice/creation_date (- (.getEpochSecond (rec/parse-rfc3339 "2026-08-07T02:41:12Z")) 35)}
+          target (rec/invoice-pairing-target invoice)
+          btc-order {:id "od_a"
+                     :status "COMPLETE"
+                     :currency "BTC"
+                     :totalAmount 2222
+                     :paidAt "2026-08-07T02:41:12Z"
+                     :label "Web Boost: LUP 670 — Memphis"
+                     :metadata {:app "web-boost" :username "Memphis"}
+                     :transactions [{:method "LIGHTNING" :status "CONFIRMED"
+                                     :amount 2222 :currency "BTC"}]}]
+      (is (true? (rec/pairs-with-complete? btc-order target))))))
+
 (deftest test-content-identity-and-tie-break
   (let [target {:show-slug "lup" :show-ep "670" :username "memphis" :sats 2222}]
     (testing "content-identical candidates + creation order -> high, latest-created wins"

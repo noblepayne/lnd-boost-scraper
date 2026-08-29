@@ -353,21 +353,68 @@
        :sats sats
        :creation-epoch (:invoice/creation_date invoice)})))
 
+(defn order-tx-sats
+  "True sats the customer actually paid, taken from the order's transaction
+   record (not the order total).
+
+   WHY THIS EXISTS — the fiat-order detection blindspot (2026-08-29):
+   Web Boost customers can pay a dollar-denominated order via lightning. The
+   Zaprite ORDER is recorded as fiat (currency \"USD\", totalAmount in cents),
+   but the underlying TRANSACTION settles in BTC sats through nodecan LND.
+   Verified across all 240 COMPLETE orders (2026-08-28 pull):
+   - BTC orders: transactions[0] is always {method LIGHTNING, currency BTC,
+     amount == totalAmount} — zero exceptions.
+   - Fiat orders: transactions[0] is either fiat (PAYPAL/VENMO/CARD, amount
+     == totalAmount, currency USD) or BTC (LIGHTNING/BITCOIN, amount = true
+     sats paid). Seven fiat COMPLETEs carry BTC txs; those sats are real
+     money that moved through nodecan.
+   So for pairing purposes the transaction — not totalAmount — is the
+   authoritative \"what was paid\" signal. Examples from live data:
+     USD 20000 order, tx LIGHTNING 312088 BTC-sats (Satsquatch, TWIB 117)
+     USD 1000 order, tx LIGHTNING 15556 BTC-sats (CypherCitizen, TWIB 109)
+
+   Returns the tx sats as a long when the order has a confirmed BTC
+   transaction, else nil (fiat-only txs, no txs, PENDING orders)."
+  [{:keys [transactions] :as _order}]
+  (some (fn [{:keys [method currency status amount]}]
+          (when (and (contains? #{"LIGHTNING" "BITCOIN"} method)
+                     (= "BTC" currency)
+                     (= "CONFIRMED" status)
+                     (pos? (or (parse-long-or-nil amount) 0)))
+            (parse-long-or-nil amount)))
+        transactions))
+
 (defn pairs-with-complete?
   "COMPLETE-pairing rule: an invoice is already-boosted when a COMPLETE order
-   exists with the same normalized username, slug+ep, BTC sats, and a paidAt
-   within the pairing window of the invoice's creation. Zaprite marks COMPLETE
-   only after its polling observes settlement, so paidAt lands seconds-to-
-   minutes after the invoice's creation-time (observed ~5s-2min live).
-   Username is load-bearing: same-show/same-amount COMPLETEs from other users
-   exist. Non-BTC never pairs (fiat totalAmount is not sats)."
-  [{:keys [status currency paidAt] :as order}
+   exists that represents the same payment, with a paidAt within the pairing
+   window of the invoice's creation. Zaprite marks COMPLETE only after its
+   polling observes settlement, so paidAt lands seconds-to-minutes after the
+   invoice's creation-time (observed ~5s-2min live).
+
+   \"Same payment\" is tested by amount, and amount has two valid forms:
+
+   1. BTC order: order totalAmount (in sats) equals the invoice sats, via
+      `order-sats`.
+   2. FIAT order paid via lightning/onchain: order totalAmount is fiat cents
+      and CANNOT be compared to sats — but the order's confirmed BTC
+      transaction (`order-tx-sats`) records the true sats paid. This case
+      closes the fiat-pairing blindspot that left 4 invoices (415,156 sats)
+      falsely unmatched after the phase-5 deploy: e.g. Satsquatch's USD 20000
+      order whose LIGHTNING tx paid exactly 312088 sats — the same payment as
+      the settled 312088-sat invoice 343910.
+
+   Username is load-bearing in both cases: same-show/same-amount COMPLETEs
+   from other users exist. Payment rail is not: a fiat order paid via
+   lightning IS the same payment as its invoice, while a fiat order paid via
+   card never has a BTC tx and still cannot pair (its sats-equivalent never
+   touched nodecan)."
+  [{:keys [status paidAt] :as order}
    {:keys [username show-slug show-ep sats creation-epoch] :as _target}]
   (boolean
    (and (= "COMPLETE" status)
-        (= "BTC" currency)
         paidAt
-        (= sats (order-sats order))
+        (or (= sats (order-sats order))                 ; BTC order
+            (= sats (order-tx-sats order)))             ; fiat order paid in sats
         (= username (candidate-id order))
         (when-let [par (parse-web-boost-memo (str (:label order)))]
           (and (= show-slug (:show-slug par))

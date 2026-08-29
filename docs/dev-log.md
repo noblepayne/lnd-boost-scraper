@@ -7,6 +7,57 @@ Format: date · decision · why.
 
 ---
 
+## 2026-08-29 · Fiat-pairing blindspot fixed (detection completeness)
+
+### The blindspot, explained
+
+After the phase-5 deploy, `unmatched` sat at 4 invoices / 415,156 sats. These were the last
+invoices the matcher could not explain. Investigation showed they are NOT orphans — they are
+the invoice half of **fiat-denominated web boosts paid via lightning**:
+
+- The web-boost widget lets a customer pick a dollar amount (e.g. $200). Zaprite records the
+  ORDER in fiat (`currency: "USD"`, `totalAmount: 20000` cents), but the customer pays through
+  nodecan LND, so the underlying TRANSACTION settles in BTC sats (312,088).
+- Zaprite marks that order COMPLETE after polling observes the settlement — `paidAt` lands
+  ~1 minute after the LND invoice's creation. Same payment, two records: a fiat order
+  (already ingested by the normal sync as a `:fiat` boost) and a bare nodecan invoice entity.
+- The pairing rule required `currency == "BTC"` on the order, so these could never pair —
+  the matcher kept re-reporting them as unmatched noise.
+
+Verified tx semantics across all 240 COMPLETE orders (2026-08-28 pull, zero exceptions):
+- BTC orders: `transactions[0]` = LIGHTNING/BTC/amount == totalAmount always.
+- Fiat orders: tx is either fiat (PAYPAL/VENMO/CARD, amount == totalAmount — the sats
+  equivalent never touched nodecan) or BTC (LIGHTNING/BITCOIN, amount = true sats paid).
+
+### The fix
+
+`order-tx-sats` extracts the confirmed BTC transaction amount from an order; `pairs-with-complete?`
+now accepts EITHER the order total (BTC orders) OR the confirmed BTC tx amount (fiat orders
+paid via lightning/onchain) as the "same payment" signal. Rail is deliberately NOT a filter:
+a fiat order paid via lightning IS the same payment as its invoice; a fiat order paid via card
+has no BTC tx and still cannot pair — correctly, because its value never moved through nodecan.
+
+Predicted effect on next deploy: `unmatched` 4 → 0, `already-boosted` 118 → 122.
+
+### What was deliberately NOT changed
+
+An earlier session claim — "fiat boosts show 0 sats, reports are wrong" — was **retracted after
+verification**: `value_sat_total 0` on fiat entities is by design. Reports bucket by
+`:boostagram/type`: ballers sums sats from `:sat` entities; the fiat section sums
+`amount_fiat_cents` from `:fiat` entities and renders "$200.00 (lightning)" — accurate, no
+money mis-displayed, no double-count. The near-miss lesson: verify what the report layer
+actually renders before "fixing" the data layer.
+
+### Open product decision (Wes's call, recorded here so it isn't lost)
+
+The 4 lightning-settled fiat boosts represent **415,156 real sats received by the shows**, but
+they only appear in the fiat section (as dollars), not in ballers (sats). Moving lightning-paid
+fiat boosts into ballers would make the sats view complete. The wrinkle: 77+ other fiat boosts
+were paid via card/PayPal — real revenue, but those sats never existed in nodecan. Clean rule
+if pursued: **fiat boost with a confirmed BTC tx also counts in ballers (tx sats); card/PayPal
+fiat stays fiat-only.** Double-count implication (same boost visible in two sections) must be
+accepted or the sections relabeled. Not built — needs a deliberate product decision.
+
 ## 2026-08-29 · Phase 5 deployed — matcher verified live, two new findings
 
 - **Deployed**: box rebuilt with `db8c2d6` (unified fetch + pairing rule + content-identity
