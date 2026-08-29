@@ -7,7 +7,34 @@ Format: date · decision · why.
 
 ---
 
-## 2026-08-28 · Phase 5 matcher upgrade built (tests first, review-amended)
+## 2026-08-29 · Phase 5 deployed — matcher verified live, two new findings
+
+- **Deployed**: box rebuilt with `db8c2d6` (unified fetch + pairing rule + content-identity
+  guard). Live preview: **already-boosted 16 → 118** (pairing rule absorbed ~100 false
+  positives), **unmatched 101 → 4**, orphans 0 (nothing left to backfill for BTC-matchable
+  invoices), manual-review 3.
+- **Finding A — the 4 big unmatched rows (~415k sats) are NOT orphans**: each maps exactly to
+  a **fiat-order COMPLETE** (Satsquatch USD 20,000 → tx CONFIRMED 312,088 BTC-sats; daomah
+  USD 3,000 → 47,632; John A USD 2,500 → 39,880; CypherCitizen USD 1,000 → 15,556). They are
+  already in the ledger via the normal sync — but as `:boostagram/type :fiat` entities with
+  **`value_sat_total 0`**. Pairing requires currency==BTC, so the matcher cannot see them.
+  Fix direction: pairing should also consider the LIGHTNING transaction amount (available in
+  the order's `transactions`), not just `totalAmount` — then these 4 classify as
+  already-boosted and unmatched truly goes to 0.
+- **Finding B — fiat boosts lose sats fidelity (separate improvement, user-facing)**:
+  `process-order` sets `value_sat_total 0` for fiat orders, but the Zaprite transaction
+  carries the true sats. A 312k-sat boost shows as 0 sats in reports. Worth fixing in
+  `process-order` (take `transactions[0].amount` when BTC-sats and `type :fiat`), with a
+  backfill sweep for existing fiat entities. Satsquatch's July BTC order (25,353) already
+  carries correct sats, so only fiat rows are affected.
+- **Memphis guard held correctly**: the two candidates' messages genuinely differ ("Thanks for
+  all the value! Web boost FTW" vs "Thanks for the value!") — content-identity refuses them,
+  as designed. This is now an operator choice, not a matcher gap. Same for the anon 323627
+  group (6 candidates — double-creation twins; needs group-aware COMPLETE-exclusion logic to
+  collapse) and a new Hydragyrum LUP-668 pair (2,000, previously unmatched).
+- **Backfill: intentionally not run** — orphans=0, nothing to write. The write flag remains
+  on the box; flip to false on next routine rebuild per the plan (§3 step 3 amended: no
+  backfill needed).
 
 - **Plan** (`docs/orphan-reconcile-phase5-plan.md`) went through an agent design review
   (verdict BUILD AS AMENDED). Amendments adopted:
