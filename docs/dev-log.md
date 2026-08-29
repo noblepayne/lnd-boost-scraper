@@ -7,6 +7,69 @@ Format: date · decision · why.
 
 ---
 
+## 2026-08-29 · Feed WebSocket dedup bug — fixed (three-layer bug)
+
+### The symptom
+
+Boost cards appeared as duplicates in the live feed when the page was left open. pabi's
+"TIMETRAVEL BOOOOST! EP 77...Roborock Vacuums" appeared 3×; genebean's "hold music from
+data in LUP680" appeared 2×. The HTTP API returned100 unique items — zero server-side
+duplicates — so the duplication was happening client-side via the WebSocket.
+
+### Root cause (three layers deep)
+
+**Layer 1 — `select-keys` omission (server):** All three `broadcast!` call sites
+(`upstream/zaprite.clj`, `upstream/r2.clj`, `db.clj`) used `select-keys` that did NOT
+include `:boostagram/content_id` or `:invoice/identifier`. So the WebSocket sent
+`content_id: null` in every boost message.
+
+**Layer 2 — HTTP vs WS asymmetry (server):** The HTTP feed query uses
+`(get-else $ ?e :boostagram/content_id "")` — defaulting to empty string `""` when the
+attribute is absent. The WebSocket sent `null`. Same entity, two different representations
+for the same field.
+
+**Layer 3 — `boostKey` priority (client):** The client's `boostKey` used `identifier`
+first, then `content_id`. With `content_id: null` from the WebSocket, the key fell through
+to `identifier` (e.g. `"id:349963"`). But the HTTP-fed card used `content_id` (e.g.
+`"cid:3a6c5455..."`). Different keys → dedup failed → duplicate cards inserted.
+
+**Why it was hard to catch:** the server-side dedup (`feed.clj dedup-by-content-id`) works
+correctly — it collapses entities sharing a `content_id` into one HTTP row. So the API
+always returned clean data. The bug only manifests when the WebSocket broadcasts the raw
+entity (no dedup) AND the client's dedup key differs from the HTTP key.
+
+### The fix
+
+Three changes, all needed:
+
+1. **`select-keys` in all 3 `broadcast!` sites** — added `:boostagram/content_id` and
+   `:invoice/identifier`. Now the WebSocket sends the same fields the HTTP feed uses.
+
+2. **`boostKey` in `feed.js`** — swapped priority to `content_id` first, matching the
+   server-side `dedup-by-content-id` logic. Added prefixed keys (`cid:`, `id:`, `eid:`,
+   `raw:`) to prevent accidental collisions between fallback types.
+
+3. **Deployed to box** — `4f9cf0b`, verified: Roborock count 3→1, hold music count 2→1.
+
+### What the near-miss taught
+
+This was a classic "everything works in isolation" bug: the HTTP feed is correct, the
+WebSocket broadcast is correct, the client dedup is correct — but the data contract
+between HTTP and WS was asymmetric (`""` vs `null` for the same semantic field). The
+client-side fix (content_id-first) was necessary but insufficient without the server-side
+fix (include the field in select-keys). Both layers needed to agree on the data shape.
+
+### Active session log
+
+Also in this session:
+- **Fiat-pairing blindspot fixed** (see entry below): `unmatched` 4→0, `already-boosted`
+  118→122. `order-tx-sats` + `pairs-with-complete?` extension.
+- **Retracted "fiat boosts show 0 sats" claim**: `value_sat_total 0` on fiat entities is
+  by design; reports render "$200.00 (lightning)" correctly. Near-miss lesson documented.
+- **Open product decision**: should fiat-via-lightning boosts also appear in ballers?
+  Recorded for Wes's consideration.
+- **`reconcileWrite` flipped to false** during the deploy.
+
 ## 2026-08-29 · Fiat-pairing blindspot fixed (detection completeness)
 
 ### The blindspot, explained
