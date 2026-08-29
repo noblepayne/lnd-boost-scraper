@@ -128,6 +128,8 @@
                                                           :boostagram/podcast
                                                           :boostagram/episode
                                                           :boostagram/message
+                                                          :boostagram/content_id
+                                                          :invoice/identifier
                                                           :invoice/creation_date])))
                     (swap! total inc)
                     (when-let [paid (get order :paidAt)]
