@@ -54,16 +54,22 @@ document.addEventListener('DOMContentLoaded', function() {
     return div.innerHTML;
   }
   
-  // Generate dedup key for a boost — prefer stable identifier
+  // Generate dedup key for a boost — prefer content_id (matches server-side
+  // dedup-by-content-id in feed.clj). When two entities share a content_id
+  // (e.g. a Zaprite order + its nodecan invoice for the same payment), the
+  // HTTP feed already collapses them to one row. But the WebSocket broadcasts
+  // each entity separately with different identifiers. Using identifier-first
+  // would produce distinct keys → duplicate cards in the DOM. content_id is
+  // the stable identity across entity sources.
   function boostKey(boost) {
-    if (boost.identifier) return boost.identifier;
-    if (boost.content_id) return boost.content_id;
-    if (boost.id) return boost.id;
+    if (boost.content_id) return 'cid:' + boost.content_id;
+    if (boost.identifier) return 'id:' + boost.identifier;
+    if (boost.id) return 'eid:' + boost.id;
     const sender = boost.sender || '';
     const sats = boost.sats || 0;
     const podcast = boost.podcast || '';
     const message = (boost.message || '').substring(0, 80);
-    return `${boost.time}|${sender}|${sats}|${podcast}|${message}`;
+    return `raw:${boost.time}|${sender}|${sats}|${podcast}|${message}`;
   }
   
   // Create a boost card HTML
