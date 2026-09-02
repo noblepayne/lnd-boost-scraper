@@ -120,6 +120,89 @@
       (is (:truncated result)))))
 
 ;; ============================================================================
+;; query-proxy: allowlist walker (RCE defense — 2026-09-01)
+;; The 0.9.13 embedded resolver falls through to (resolve sym) → arbitrary
+;; code exec + dot-form reflection. validate-query-fns must reject these.
+;; ============================================================================
+
+(deftest test-allowlist-rejects-load-string
+  (testing "load-string is rejected (RCE vector)"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :where [[_ :boostagram/value_sat_total _] [(clojure.core/load-string \"(+ 1 2)\") ?x]]}"
+                                   {})]
+      (is (= :error (:status result)))
+      (is (re-find #"(?i)load-string" (:detail result))))))
+
+(deftest test-allowlist-rejects-slurp
+  (testing "slurp is rejected (file-read vector)"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :where [[_ :boostagram/value_sat_total _] [(clojure.core/slurp \"/etc/hostname\") ?x]]}"
+                                   {})]
+      (is (= :error (:status result)))
+      (is (re-find #"(?i)slurp" (:detail result))))))
+
+(deftest test-allowlist-rejects-shell
+  (testing "clojure.java.shell/sh is rejected"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :where [[_ :boostagram/value_sat_total _] [(clojure.java.shell/sh \"echo\" \"hi\") ?x]]}"
+                                   {})]
+      (is (= :error (:status result))))))
+
+(deftest test-allowlist-rejects-eval
+  (testing "eval is rejected"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :where [[_ :boostagram/value_sat_total _] [(clojure.core/eval \"(foo)\") ?x]]}"
+                                   {})]
+      (is (= :error (:status result))))))
+
+(deftest test-allowlist-rejects-dot-form
+  (testing "dot-form reflection is rejected"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :where [[_ :boostagram/value_sat_total _] [(.getClass ?x) _]]}"
+                                   {})]
+      (is (= :error (:status result))))))
+
+(deftest test-allowlist-rejects-rule-binding
+  (testing "rule bindings (% / %%) are rejected"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :in [$ %] :where [(rule ?x)]}"
+                                   {})]
+      (is (= :error (:status result))))))
+
+(deftest test-allowlist-rejects-apply
+  (testing "apply is rejected (registry escape)"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :where [[_ :boostagram/value_sat_total _] [(apply str \"a\") ?x]]}"
+                                   {})]
+      (is (= :error (:status result))))))
+
+(deftest test-allowlist-rejects-unknown-key
+  (testing "unknown top-level query keys are rejected (strict)"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [?x] :where [[?e :boostagram/value_sat_total ?x]] :having true}"
+                                   {})]
+      (is (= :error (:status result))))))
+
+(deftest test-allowlist-allows-legit
+  (testing "benign registry fns pass: get-else, re-matches, str, <, sum, count-distinct"
+    (let [result (qp/execute-query *conn*
+                                   "{:find [(count-distinct ?s)] :with [?e]
+                                     :where [[?e :boostagram/sender_name_normalized ?s]
+                                             [(get-else $ ?e :boostagram/episode \"x\") ?ep]
+                                             [(str ?ep \"y\") ?z]
+                                             [(< 0 1)]]}"
+                                   {})]
+      (is (= :ok (:status result))))))
+
+(deftest test-allowlist-rejects-large-query
+  (testing "oversized queries are rejected"
+    (let [big-message (apply str (repeat 70000 "a"))
+          result (qp/execute-query *conn*
+                                   (str "{:find [?x] :where [[_ :boostagram/message \"" big-message "\"]]}")
+                                   {})]
+      (is (= :error (:status result))))))
+
+;; ============================================================================
 ;; analysis: top-boosters
 ;; ============================================================================
 

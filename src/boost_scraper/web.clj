@@ -319,7 +319,10 @@
                                                             params (assoc :params params)
                                                             timeout (assoc :timeout timeout)
                                                             limit (assoc :limit limit)))]
-                             {:status (if (= :ok (:status result)) 200 400)
+                             {:status (cond
+                                         (= :ok (:status result)) 200
+                                         (= :busy (:code result)) 429
+                                         :else 400)
                               :headers {"content-type" "application/json"}
                               :body (json/generate-string result)}))))}}]
    ;; Query templates
