@@ -7,6 +7,89 @@ Format: date · decision · why.
 
 ---
 
+## 2026-09-01 · Query proxy was a remote code execution backdoor — fixed + hardened
+
+### Discovery (the "flexible query API" conversation)
+
+Wes wanted a general Datalog query API so a smart bot could ask arbitrary
+questions of the boost DB. We already had `POST /api/v1/query` + templates,
+but reviewing it (because it'd never actually been used) surfaced a **critical
+hole**: the endpoint could execute arbitrary code on nodecan.
+
+### Root cause — datalevin 0.9.13's function resolver
+
+The embedded query engine resolves a function symbol in a predicate/fn clause
+by this chain (`src/datalevin/query.clj`):
+
+    (or (get built-ins/query-fns f)      ; 1. curated registry — tried first
+        (context-resolve-val context f)  ; 2. :in-bound values
+        (dot-form f)                     ; 3. (.method obj ...) raw reflection
+        (resolve-sym f))                 ; 4. (resolve sym) ANY var in any ns
+
+So the registry is only the *first* branch — anything not in it falls through
+to `(resolve sym)`, which finds **any var in any loaded namespace**, plus a
+separate dot-form reflection escape that skips the registry entirely.
+
+**Confirmed live on nodecan:**
+- `[(clojure.core/load-string "(+ 1 2)") ?x]` → executed, returned `3` (RCE)
+- `[(clojure.core/slurp "/etc/hostname") ?x]` → returned `"nodecan"` (file read)
+- `[(.getClass ?x) _]` → dot-form reflection path (open too)
+- `clojure.java.shell/sh` failed only because that ns wasn't loaded — moot, since
+  `load-string` bridges to everything.
+
+The module's docstring "Read-only by construction — never imports d/transact!"
+was misleading: you don't need `d/transact!` when `load-string` exists.
+
+### Upstream research (what the review taught us)
+
+- **0.9.13** has no `:server-safe` mode. The registries exist as
+  `datalevin.built-ins/query-fns` (predicates/fns) and
+  `datalevin.built-ins/aggregates` (sum/count/…), both benign read-only sets.
+- **1.x** added `datalevin.query.resolve/*resolver-mode*` — `:server-safe`
+  restricts queries to registry + registered `:db/udf`s and rejects qualified
+  symbols, dot-forms, fn literals, and `apply`. That's the upstream-sanctioned
+  answer to this exact problem. **But** we're on 0.9.13 (upgrade requires
+  storage migration — see `docs/datalevin-upgrade-plan.md`).
+- So we implement `:server-safe` semantics ourselves on 0.9.13, before `d/q`.
+
+### The fix (`e95c187`)
+
+1. **`validate-query-fns`** — walks the parsed query (`:find`/`:where`/`:in`)
+   and allows only symbols from datalevin's own registries, **derived at
+   runtime** (`(keys datalevin.built-ins/query-fns)` + `/aggregates`) so it
+   auto-tracks upstream across upgrades. Rejects: dot-forms, `apply`, rule
+   bindings (`%`/`%%`), unknown top-level query keys, and >64 KiB queries.
+   Runs before the query reaches `d/q`.
+2. **Execution hardening** — bounded concurrency (semaphore, 3 concurrent,
+   else 429), hard timeout with `future-cancel` (previously the deref-timeout
+   left the query thread running unbounded), and try/catch → structured
+   `:error` instead of raw 500s (previously a bad query leaked as plain
+   "Internal Server Error"; the `(:exception result)` branch was dead code).
+
+**Live verification (nodecan):** `load-string`, `slurp`, `.getClass` all →
+`400 {"status":"error","detail":"Query function or form not allowed: ..."}`.
+Legit aggregate query → `ok`. 10 new tests (the exact live RCE probes) →
+124 tests / 773 assertions green.
+
+### Lesson — "regression" was actually startup-sync contention
+
+Right after deploying, the legit group-by query that had been 1.4s returned a
+timeout. Panic-checked for a proxy regression, but the call was byte-identical
+to before. Turned out the service had just restarted and was mid-scrape (Zaprite
+sync, R2 sync) — LMDB read contention made queries ~2.3× slower and the heavy
+group-by blew past the timeout. After the sync settled, the same query ran in
+1.9s. **Lesson: never judge query performance right after a service restart;
+wait for the scrape cycle to settle.**
+
+### Open follow-ups
+
+- Upgrade to datalevin 1.x (see `docs/datalevin-upgrade-plan.md`) → bind
+  `*resolver-mode* :server-safe`, keep the walker as belt-and-suspenders.
+- Fix the 5 query templates (broken — `top-boosters` has an unbound `?amount`,
+  `monthly-leaderboard` an unbound `?month`, `?boost-type` double-bind, and
+  the "run a template" route doesn't actually execute templates — API.md lies).
+- Add a schema-introspection endpoint + bot cookbook for the query API.
+
 ## 2026-08-29 · Feed WebSocket dedup bug — fixed (three-layer bug)
 
 ### The symptom

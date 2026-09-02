@@ -18,7 +18,7 @@
             [clojure.string :as str]
             [datalevin.built-ins :as bi]
             [datalevin.core :as d])
-  (:import (java.util.concurrent Semaphore TimeUnit)))
+  (:import (java.util.concurrent Semaphore)))
 
 ;; ---------------------------------------------------------------------------
 ;; Allowlist — derived from datalevin's own registries (auto-tracks upstream)
@@ -95,6 +95,9 @@
       :else                   (disallowed head))))
 
 (defn- check-find-element
+  "Validate one :find spec: a plain var/constant, an aggregation expression
+   (checked against the aggregate allowlist), or a collection spec (walked
+   as exprs). Returns nil (ok) or an error map."
   [el]
   (cond
     (list? el)   (check-find-expr el)
