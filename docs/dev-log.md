@@ -98,6 +98,21 @@ The raw Datalog proxy + `/analysis/*` endpoints + the `API.md` cookbook cover
 everything. Deleted: templates file, 2 routes, 3 tests, API.md + skill
 references.
 
+### Deliverables: shared query briefing + topic-investigation walkthrough
+
+- `docs/query-api-briefing.md` — a self-contained payload for teaching another
+  person's LLM how to query the boost API (endpoint, schema, allowlist rules,
+  cookbook, topic-analysis methodology). Shareable directly.
+- Method validated live on **The Launch**: pulled the 380 message-bearing
+  boosts via the proxy, joined `:boostagram/episode` to the show's RSS feed
+  titles (normalization: strip the leading `NN: ` prefix on both sides — 30/30
+  top episodes matched cleanly), and read the messages to cluster topic
+  engagement. Key finding: The Launch's engagement engine is listener-prompt
+  personal stories (pets/hobbies/nostalgia) by count, and show-survival
+  sustaining mega-boosts by sats; recurring cross-episode topics (AI,
+  hardware/gadgets, Flock-cameras bit, platform/corporate criticism, JB
+  rituals like TIMETRAVEL boosts) carry broad support.
+
 ## 2026-08-29 · Feed WebSocket dedup bug — fixed (three-layer bug)
 
 ### The symptom
