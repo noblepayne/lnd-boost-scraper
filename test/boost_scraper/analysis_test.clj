@@ -3,8 +3,6 @@
             [boost-scraper.db :as db]
             [boost-scraper.query-proxy :as qp]
             [boost-scraper.test-utils :as test-utils]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d])
   (:import [java.time DayOfWeek]))
@@ -339,47 +337,3 @@
     (is (= {} (:per-day-of-week (analysis/monday-boost-summary *conn* lup-regex))))
     (is (= {} (analysis/top-booster-per-month *conn* lup-regex)))
     (is (= [] (analysis/app-percentages *conn*)))))
-
-;; ============================================================================
-;; query templates from resources/query_templates.edn
-;; ============================================================================
-
-(deftest test-query-templates-parse
-  (testing "query_templates.edn parses and has expected shape"
-    (let [path "resources/query_templates.edn"]
-      (is (.exists (io/file path)) "file exists")
-      (let [data (edn/read-string (slurp path))
-            templates (:templates data)]
-        (is (seq templates) "has templates")
-        (doseq [t templates]
-          (testing (str "template: " (:name t))
-            (is (string? (:name t)))
-            (is (string? (:description t)))
-            (is (vector? (:params t)))
-            (is (map? (:query t)))
-            (is (contains? (:query t) :find))
-            (is (contains? (:query t) :in))
-            (is (contains? (:query t) :where))))))))
-
-(deftest test-query-templates-or-clause
-  (testing "templates use or clause for podcast/episode matching"
-    (let [data (edn/read-string (slurp "resources/query_templates.edn"))]
-      (doseq [t (:templates data)]
-        (testing (str "template: " (:name t))
-          (let [where (:where (:query t))]
-            (is (some #(and (list? %) (= 'or (first %))) where)
-                "contains (or ...) clause in :where")))))))
-
-(deftest test-query-templates-no-stale-refs
-  (testing "templates don't reference removed slug param"
-    (let [data (edn/read-string (slurp "resources/query_templates.edn"))]
-      (doseq [t (:templates data)]
-        (testing (str "template: " (:name t))
-          (is (not-any? #(= "slug" (:name %)) (:params t))
-              "no param with :name slug")
-          (let [in-str (pr-str (:in (:query t)))]
-            (is (not (re-find #"\?slug" in-str))
-                ":in should not contain ?slug"))
-          (let [where-str (pr-str (:where (:query t)))]
-            (is (not (re-find #"\?slug" where-str))
-                ":where should not contain ?slug")))))))

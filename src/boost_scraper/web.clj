@@ -11,7 +11,6 @@
             [boost-scraper.reconcile :as rec]
             [boost-scraper.ws :as ws]
             [cheshire.core :as json]
-            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.math :as math]
             [clojure.string :as str]
@@ -26,12 +25,6 @@
            (java.time.format DateTimeFormatter)))
 
 ;; Routes
-
-(def query-templates
-  "Lazily loaded query templates from resources."
-  (delay
-    (when-let [resource (io/resource "query_templates.edn")]
-      (edn/read-string (slurp resource)))))
 
 (defn- safe-regex-for
   "Create regex from show param with validation. Prefers allowlisted show slug, falls back to raw pattern
@@ -325,29 +318,6 @@
                                          :else 400)
                               :headers {"content-type" "application/json"}
                               :body (json/generate-string result)}))))}}]
-   ;; Query templates
-   ["/api/v1/query/templates"
-    {:get {:handler (fn [_]
-                      (let [templates @query-templates]
-                        {:status 200
-                         :headers {"content-type" "application/json"}
-                         :body (json/generate-string
-                                {:templates (mapv (fn [t]
-                                                    {:name (:name t)
-                                                     :description (:description t)})
-                                                  (:templates templates))})}))}}]
-   ["/api/v1/query/templates/:name"
-    {:get {:handler (fn [request]
-                      (let [name (get-in request [:path-params :name])
-                            templates @query-templates
-                            template (first (filter #(= (:name %) name) (:templates templates)))]
-                        (if template
-                          {:status 200
-                           :headers {"content-type" "application/json"}
-                           :body (json/generate-string {:template template})}
-                          {:status 404
-                           :headers {"content-type" "application/json"}
-                           :body (json/generate-string {:error (str "Template not found: " name)})})))}}]
    ;; Feed API endpoint — with podcast filter
    ["/api/v1/feed"
     {:get {:handler (fn [request]

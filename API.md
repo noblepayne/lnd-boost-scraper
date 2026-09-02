@@ -258,30 +258,6 @@ embedded resolver. Specifically:
 > `:boostagram/type :sat`, either inline the keyword literal in the query
 > (as above) or pass a string and compare against it.
 
-## Query Templates
-
-Pre-built query definitions, discoverable via the proxy. These are currently
-**for reference / not yet wired to execute** — the `GET /templates/:name`
-route returns the template *definition* (its `:query`, params, description),
-not results. Treat them as starting points for the proxy.
-
-`GET /api/v1/query/templates`
-
-```bash
-curl 'http://localhost:3223/api/v1/query/templates'
-```
-
-`GET /api/v1/query/templates/:name`
-
-```bash
-curl 'http://localhost:3223/api/v1/query/templates/top-boosters'
-```
-
-> ⚠️ Several template `:query` bodies are **currently broken** (unbound
-> `?amount` / `?month`, `?boost-type` double-bind) and none are executable
-> through a route. Use the cookbook queries above, or copy a template body
-> into `POST /api/v1/query` after fixing it.
-
 ## Tips
 
 - **Time ranges** use epoch seconds in **America/Los_Angeles** timezone.

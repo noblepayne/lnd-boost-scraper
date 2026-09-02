@@ -85,10 +85,18 @@ wait for the scrape cycle to settle.**
 
 - Upgrade to datalevin 1.x (see `docs/datalevin-upgrade-plan.md`) → bind
   `*resolver-mode* :server-safe`, keep the walker as belt-and-suspenders.
-- Fix the 5 query templates (broken — `top-boosters` has an unbound `?amount`,
-  `monthly-leaderboard` an unbound `?month`, `?boost-type` double-bind, and
-  the "run a template" route doesn't actually execute templates — API.md lies).
-- Add a schema-introspection endpoint + bot cookbook for the query API.
+- Add a schema-introspection endpoint + bot cookbook for the query API
+  (cookbook now lives in `API.md`).
+
+### Removed: the broken query-template system
+
+The 5 templates (`resources/query_templates.edn`) and their 2 routes were
+removed. They were broken dead code that duplicated the working `/analysis/*`
+endpoints, and 2 of them (day-of-week, monthly) couldn't be implemented under
+the new query-function allowlist (no date built-ins in datalevin's registry).
+The raw Datalog proxy + `/analysis/*` endpoints + the `API.md` cookbook cover
+everything. Deleted: templates file, 2 routes, 3 tests, API.md + skill
+references.
 
 ## 2026-08-29 · Feed WebSocket dedup bug — fixed (three-layer bug)
 

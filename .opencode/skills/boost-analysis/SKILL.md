@@ -133,9 +133,8 @@ Content-Type: application/json
  "limit": 5000}
 ```
 
-**Query templates** (pre-defined queries):
-- `GET /api/v1/templates` — list available templates
-- `GET /api/v1/templates/top-boosters?show=lup&limit=5` — run a template
+**Note:** there is no template endpoint — use `POST /api/v1/query` directly with
+the cookbook queries above (see `API.md` for the full query cookbook).
 
 ### 6. Build a Report
 
@@ -199,6 +198,5 @@ All functions accept optional `boost-type` parameter:
 - Analysis functions: `src/boost_scraper/analysis.clj`
 - Query proxy: `src/boost_scraper/query_proxy.clj`
 - HTTP routes: `src/boost_scraper/web.clj`
-- Query templates: `resources/query_templates.edn`
 - Tests: `test/boost_scraper/analysis_test.clj`
 - Project config: `.opencode/AGENTS.md`
