@@ -147,35 +147,123 @@ Same filters as feed, no `limit` cap, deduped, sorted `time DESC, identifier ASC
 
 ## Raw Datalog Proxy
 
-For ad-hoc queries that don't have a dedicated endpoint.
+For ad-hoc queries that don't have a dedicated endpoint. Accepts an EDN
+Datalog query and executes it **read-only** against the DB.
 
 `POST /api/v1/query`
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `query` | string | yes | — | EDN Datalog query map |
+| `query` | string | yes | — | EDN Datalog query map `{:find [...] :where [...]}` |
 | `params` | vector | no | `[]` | Bindings for `:in` vars |
-| `timeout` | int | no | 15000 | Max milliseconds (capped at 60000) |
+| `timeout` | int | no | 15000 | Max ms (capped at 60000) |
 | `limit` | int | no | 5000 | Max result rows (capped at 50000) |
 
 ```bash
 curl -X POST http://localhost:3223/api/v1/query \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "{:find [?s (sum ?v)] :where [[?e :boostagram/value_sat_total ?v] [(get-else $ ?e :boostagram/sender_name_normalized \"N/A\") ?s]]}",
+    "query": "{:find [?s (sum ?v)] :where [[?e :boostagram/value_sat_total ?v] [?e :boostagram/sender_name_normalized ?s]]}",
     "limit": 5
   }'
 ```
 
-Response: `{"status": "ok", "results": [...], "truncated": true, "elapsed_ms": 9141}`
+Response (success, HTTP 200):
+```json
+{"status": "ok", "results": [["senorsmile", 0], ["d3xbot", 13323], ...], "truncated": true, "elapsed_ms": 1183}
+```
 
----
+Response (error, HTTP 400/429):
+```json
+{"status": "error", "detail": "Query function or form not allowed: clojure.core/load-string"}
+```
+
+### Security: allowed functions only
+
+The endpoint is **not** a general Clojure evaluator. Queries may only call
+functions from datalevin's own built-in registry (see the "Query function
+not allowed" error). This closes the RCE/file-read hole in datalevin 0.9.13's
+embedded resolver. Specifically:
+
+- **Allowed**: registry functions — `get-else`, `get-some`, `missing?`,
+  `ground`, `str`, `count`, `re-matches`, `re-find`, `re-pattern`, `subs`,
+  `namespace`, `type`, `get`, comparisons (`<` `<=` `>` `>=` `=`), arithmetic
+  (`+` `-` `*` `/` `quot` `rem` `mod` `inc` `dec`), `like`/`not-like`,
+  `in`/`not-in`, `fulltext`, collection fns (`vector` `list` `set` `hash-map`
+  `contains?` `not-empty` `empty?`), etc.
+- **Aggregates in `:find`**: `sum`, `count`, `count-distinct`, `avg`,
+  `median`, `variance`, `stddev`, `min`, `max`, `distinct`, `rand`, `sample`.
+- **Rejected** (HTTP 400): any other symbol (e.g. `load-string`, `slurp`,
+  `eval`, `clojure.java.shell/sh`), **dot-forms** (`(.method ...)`), `apply`,
+  rule bindings (`%`/`%%`), unknown query-map keys, queries over 64 KiB.
+- `pull`/`pull-many` are **not** available through this endpoint.
+- When the concurrency limit (3) is hit, returns HTTP 429 with `:code :busy`.
+
+### Query-writing notes
+
+- Use plain pattern clauses and avoid `get-else`/`get-some` over full-table
+  scans — any per-row function over a big scan is far slower (~40× in our
+  tests: 9.7s vs 58ms). Prefer ensuring attributes exist at write time
+  (backfill), then query with plain pattern clauses. `get-some` is for
+  "first attribute that's present across a list" (returns `[attr value]`),
+  not a faster `get-else`.
+- If your query has **no `$`-referencing built-in and no pattern clause**, it
+  expects zero inputs and the proxy's auto-passed DB breaks it — add an
+  explicit `:in [$]` or include a pattern clause.
+- Time ranges are epoch seconds in **America/Los_Angeles**. Compute easily:
+  `python3 -c "from datetime import datetime; print(int(datetime(2026,1,1).timestamp()))"`
+- Attribute names (from the schema): `:boostagram/sender_name_normalized`,
+  `:boostagram/value_sat_total`, `:boostagram/podcast`, `:boostagram/episode`,
+  `:boostagram/message`, `:boostagram/app_name`, `:boostagram/type`
+  (`:sat`/`:fiat`/`:member-free`), `:boostagram/amount_fiat_cents`,
+  `:invoice/creation_date` (epoch seconds), `:scraper/source`, etc.
+
+## Query Cookbook (real, tested queries)
+
+```clojure
+;; Top boosters by sats
+{:find [?s (sum ?v)]
+ :where [[?e :boostagram/value_sat_total ?v]
+         [?e :boostagram/sender_name_normalized ?s]]}
+
+;; Boost count by app
+{:find [?a (count ?e)]
+ :where [[?e :boostagram/app_name ?a]]}
+
+;; Boosts (with messages) for one show
+{:find [?s ?m]
+ :where [[?e :boostagram/podcast "LINUX Unplugged"]
+         [?e :boostagram/sender_name_normalized ?s]
+         [?e :boostagram/message ?m]]}
+
+;; Boosts in a time window (epoch seconds)
+{:find [?s ?cd ?v]
+ :where [[?e :boostagram/sender_name_normalized ?s]
+         [?e :invoice/creation_date ?cd]
+         [?e :boostagram/value_sat_total ?v]
+         [(>= ?cd 1788000000)]]}
+
+;; Boosts of a given type, filtered by regex on the podcast name.
+;; NOTE: re-matches needs a Pattern — build it with re-pattern first.
+{:find [(count-distinct ?s)]
+ :where [[?e :boostagram/type :sat]
+         [?e :boostagram/podcast ?p]
+         [(re-pattern "(?i).*unplugged.*") ?pat]
+         [(re-matches ?pat ?p)]
+         [?e :boostagram/sender_name_normalized ?s]]}
+```
+
+> Note: `:params` come from a JSON array, so they can only be strings/numbers/
+> booleans — you cannot pass a keyword via `params`. To filter by
+> `:boostagram/type :sat`, either inline the keyword literal in the query
+> (as above) or pass a string and compare against it.
 
 ## Query Templates
 
-Pre-built queries available through the proxy.
-
-### List Templates
+Pre-built query definitions, discoverable via the proxy. These are currently
+**for reference / not yet wired to execute** — the `GET /templates/:name`
+route returns the template *definition* (its `:query`, params, description),
+not results. Treat them as starting points for the proxy.
 
 `GET /api/v1/query/templates`
 
@@ -183,17 +271,16 @@ Pre-built queries available through the proxy.
 curl 'http://localhost:3223/api/v1/query/templates'
 ```
 
-### Run a Template
-
 `GET /api/v1/query/templates/:name`
 
-Template params are passed as query string arguments. Each template documents its own params in the listing response.
-
 ```bash
-curl 'http://localhost:3223/api/v1/query/templates/top-boosters?show=lup&limit=5'
+curl 'http://localhost:3223/api/v1/query/templates/top-boosters'
 ```
 
----
+> ⚠️ Several template `:query` bodies are **currently broken** (unbound
+> `?amount` / `?month`, `?boost-type` double-bind) and none are executable
+> through a route. Use the cookbook queries above, or copy a template body
+> into `POST /api/v1/query` after fixing it.
 
 ## Tips
 
