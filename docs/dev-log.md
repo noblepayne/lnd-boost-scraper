@@ -89,6 +89,29 @@ no-double-count were the deciding principles.
 4. `docs/orphan-reconcile-spec.md` unchanged (resolve complements, not
    contradicts, the spec — the write-gate contract is identical).
 
+### Post-action verification (live, 2026-09-02)
+
+| Check | Result |
+|---|---|
+| `write-enabled` after gate-off | `False`, `written 0` |
+| Memphis boost entity | present: `memphis` / 2222 sats / LINUX Unplugged / 670 / ts 1786070437 (= LND settle 08-07 03:36:14Z) — no message, no `zaprite_order_id` |
+| Memphis aggregation | ep 670 → 2,222 sats in the query proxy |
+| Preview after resolve | `manual-review: ['323627']` (Anon only), `already-boosted: 129` |
+| Live-feed parity | resolve broadcasts via `ws/broadcast!` like a normal Zaprite boost |
+| Full suite | 123 tests / 744 assertions green |
+
+Also during this deploy: a bare `nix flake update` on the box bumped **every**
+flake input (nixpkgs too) and the new nixpkgs marked `broadcom-sta` insecure,
+breaking the rebuild. Fixed by restoring `flake.lock` from git and re-locking
+with the surgical `nix flake lock --update-input lnd-boost-scraper`.
+**Lesson: never run a bare `nix flake update` on the box — always scope to the
+`lnd-boost-scraper` input.**
+
+Remaining state: Anon 323627 (2,222 sats) stays in manual-review by
+deliberate choice — its two identical-destination bookings already exist and
+no source document distinguishes a third payment; the conservative treatment
+is to leave it unmatched rather than double-book.
+
 ## 2026-09-01 · Query proxy was a remote code execution backdoor — fixed + hardened
 
 ### Discovery (the "flexible query API" conversation)
