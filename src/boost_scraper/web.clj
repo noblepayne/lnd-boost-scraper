@@ -177,7 +177,7 @@
                                            :margin-right "50px"}}
                       (markdown/parse-body report)]]))]]]]]])}))))
 
-(declare handle-reconcile-preview handle-reconcile-backfill)
+(declare handle-reconcile-preview handle-reconcile-backfill handle-reconcile-resolve)
 
 (defn routes [db-conn]
   [["/ping"
@@ -226,6 +226,8 @@
     {:get {:handler (handle-reconcile-preview db-conn)}}]
    ["/api/v1/reconcile/backfill"
     {:post {:handler (handle-reconcile-backfill db-conn)}}]
+   ["/api/v1/reconcile/resolve"
+    {:post {:handler (handle-reconcile-resolve db-conn)}}]
    ;; Analysis endpoints
    ["/api/v1/analysis/top-boosters"
     {:get {:handler (fn [request]
@@ -524,6 +526,40 @@
                                    :unmatched (count (:unmatched result)))))
           (catch Exception e
             (reconcile-json 500 {:error (str "reconcile: " (.getMessage e))})))
+        (reconcile-json 400 {:error "ZAPRITE_API_KEY_PATH not set or unreadable"})))))
+
+(defn handle-reconcile-resolve
+  "Operator write path for a manual-review invoice (the human pick). Gated by
+   the same WEB_BOOST_RECONCILE_WRITE flag as backfill — 403 when off, so a
+   resolve is a deliberate two-step (flag on → resolve → flag off). Body:
+   {:identifier \"342724\"} with optional :order-id to attribute the boost to
+   an order's metadata (message/episode title) instead of a bare invoice
+   write. Never called for already-boosted invoices (409)."
+  [db-conn]
+  (fn [{:keys [body-params]}]
+    (if-not (reconcile-write-enabled?)
+      (reconcile-json 403 {:error "write disabled (WEB_BOOST_RECONCILE_WRITE != true)"})
+      (if-let [api-key (zaprite-api-key)]
+        (try
+          (let [identifier (or (:identifier body-params)
+                               (get body-params "identifier"))
+                order-id (or (:order-id body-params) (get body-params "order-id"))]
+            (if (empty? identifier)
+              (reconcile-json 400 {:error "identifier required"})
+              (let [order (when (seq order-id)
+                            (first (filter #(= order-id (:id %))
+                                           (rec/fetch-unified-orders api-key))))
+                    result (rec/resolve-manual-review! db-conn identifier order)]
+                (case (:status result)
+                  :ok (do (ws/broadcast! (:entity result))
+                          (reconcile-json 200
+                                          (assoc result
+                                                 :write-enabled true
+                                                 :identifier identifier)))
+                  :already-boosted (reconcile-json 409 result)
+                  :not-found (reconcile-json 404 result)))))
+          (catch Exception e
+            (reconcile-json 500 {:error (str "resolve: " (.getMessage e))})))
         (reconcile-json 400 {:error "ZAPRITE_API_KEY_PATH not set or unreadable"})))))
 
 (defn make-virtual

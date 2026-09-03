@@ -27,7 +27,13 @@
                      :invoice/memo "Payment for Web Boost: TWIB 108 — debitcoinkoers.eu"
                      :invoice/value 10000
                      :invoice/settled true
-                     :invoice/settle_date "2026-06-13T13:34:50Z"}])
+                     :invoice/settle_date "2026-06-13T13:34:50Z"}
+                    {:invoice/identifier "342724"
+                     :invoice/memo "Payment for Web Boost: LUP 670 — Memphis"
+                     :invoice/value 2222
+                     :invoice/settled true
+                     :invoice/settle_date "2026-08-07T03:36:14Z"
+                     :invoice/creation_date (.getEpochSecond (rec/parse-rfc3339 "2026-08-07T02:40:37Z"))}])
       (let [routes (web/routes conn)
             preview (find-handler routes :get "/api/v1/reconcile/preview")
             backfill (find-handler routes :post "/api/v1/reconcile/backfill")
@@ -70,7 +76,35 @@
             (let [body (json/parse-string (:body (backfill {})) true)]
               (is (= 0 (:written body)))
               (is (= 1 (:skipped body)))
-              (is (= 1 (count (boost-entities conn))))))))
+              (is (= 1 (count (boost-entities conn)))))))
+        (let [resolve (find-handler routes :post "/api/v1/reconcile/resolve")]
+          (testing "resolve is gated by the write flag"
+            (with-redefs [web/zaprite-api-key (fn [] "k")
+                          web/reconcile-write-enabled? (fn [] false)]
+              (let [resp (resolve {:body-params {:identifier "325043"}})]
+                (is (= 403 (:status resp))))))
+          (testing "resolve requires an identifier"
+            (with-redefs [web/zaprite-api-key (fn [] "k")
+                          web/reconcile-write-enabled? (fn [] true)]
+              (let [resp (resolve {:body-params {}})]
+                (is (= 400 (:status resp))))))
+          (testing "resolve writes an unknown-invoice 404"
+            (with-redefs [web/zaprite-api-key (fn [] "k")
+                          web/reconcile-write-enabled? (fn [] true)]
+              (let [resp (resolve {:body-params {:identifier "999999"}})]
+                (is (= 404 (:status resp))))))
+          (testing "resolve writes the settled invoice when the flag is on"
+            (with-redefs [web/zaprite-api-key (fn [] "k")
+                          web/reconcile-write-enabled? (fn [] true)]
+              (let [resp (resolve {:body-params {:identifier "342724"}})
+                    body (json/parse-string (:body resp) true)]
+                (is (= 200 (:status resp)))
+                (is (= "ok" (:status body)))
+                (is (= 2222 (:boostagram/value_sat_total (:entity body)))
+                    "entity carries the settled amount")
+                (is (= "memphis" (:boostagram/sender_name_normalized (:entity body))))
+                (is (= 2 (count (boost-entities conn)))
+                    "one backfill boost + one resolved boost"))))))
       (finally
         (d/close conn)
         (test-utils/delete-dir-recursively (io/file tmpdir))))))

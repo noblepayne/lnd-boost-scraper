@@ -585,12 +585,13 @@
         target (rec/invoice-pairing-target invoice)]
     (testing "pairing target extraction"
       (is (= {:username "memphis" :show-slug "lup" :show-ep "670" :sats 2222
-              :creation-epoch (:invoice/creation_date invoice)}
+              :creation-epoch (:invoice/creation_date invoice)
+              :settle-epoch nil}
              target)))
     (testing "matching complete within window pairs"
       (is (true? (rec/pairs-with-complete? complete target))))
-    (testing "paidAt just outside the window does not pair"
-      (let [far (assoc complete :paidAt "2026-08-07T02:55:00Z")]
+    (testing "paidAt beyond the 2h pairing window does not pair"
+      (let [far (assoc complete :paidAt "2026-08-07T05:00:00Z")]
         (is (false? (rec/pairs-with-complete? far target)))))
     (testing "username mismatch does not pair (same show/amount, other user)"
       (let [other (assoc-in complete [:metadata :username] "SomeoneElse")]
@@ -671,6 +672,122 @@
                      :transactions [{:method "LIGHTNING" :status "CONFIRMED"
                                      :amount 2222 :currency "BTC"}]}]
       (is (true? (rec/pairs-with-complete? btc-order target))))))
+
+(deftest test-pairs-with-complete-webhook-lag
+  (testing "COMPLETE order with a lagging webhook pairs via the LND settle anchor
+            (2026-09-02 false-positive fix: Hydragyrum LUP-668, invoice 327805
+            settled 20:45:29, order paidAt 21:30:34 — 45min webhook lag that
+            broke the old creation-anchored 600s window)"
+    (let [invoice {:invoice/identifier "327805"
+                   :invoice/memo "Payment for Web Boost: LUP 668 — Hydragyrum"
+                   :invoice/value 2000
+                   :invoice/creation_date (.getEpochSecond (rec/parse-rfc3339 "2026-06-23T20:45:09Z"))
+                   :invoice/settle_date "2026-06-23T20:45:29Z"}
+          lagged-order {:id "od_hTEwY3DUVX"
+                        :status "COMPLETE"
+                        :currency "BTC"
+                        :totalAmount 2000
+                        :paidAt "2026-06-23T21:30:34Z"
+                        :label "Web Boost: LUP 668 — Hydragyrum"
+                        :metadata {:app "web-boost" :username "Hydragyrum"}}
+          target (rec/invoice-pairing-target invoice)]
+      (is (= 1782247529 (.getEpochSecond (rec/parse-rfc3339 "2026-06-23T20:45:29Z"))))
+      (is (= 1782247529 (:settle-epoch target)) "settle epoch carried onto the target")
+      (is (true? (rec/pairs-with-complete? lagged-order target))
+          "45min lag pairs once anchored on settle and window is 2h")))
+  (testing "the window is still bounded — a same-user order 3h later does NOT pair"
+    (let [invoice {:invoice/identifier "900000"
+                   :invoice/memo "Payment for Web Boost: LUP 668 — Hydragyrum"
+                   :invoice/value 2000
+                   :invoice/creation_date (.getEpochSecond (rec/parse-rfc3339 "2026-06-23T20:45:09Z"))
+                   :invoice/settle_date "2026-06-23T20:45:29Z"}
+          too-late {:id "od_late"
+                    :status "COMPLETE"
+                    :currency "BTC"
+                    :totalAmount 2000
+                    :paidAt "2026-06-23T23:50:00Z"
+                    :label "Web Boost: LUP 668 — Hydragyrum"
+                    :metadata {:app "web-boost" :username "Hydragyrum"}}]
+      (is (false? (rec/pairs-with-complete? too-late (rec/invoice-pairing-target invoice))))))
+  (testing "settle absent falls back to creation (pre-settle-date invoices)"
+    (let [invoice {:invoice/identifier "323503"
+                   :invoice/memo "Payment for Web Boost: TWIB 108 — Anonymous"
+                   :invoice/value 2222
+                   :invoice/creation_date (.getEpochSecond (rec/parse-rfc3339 "2026-06-10T21:41:20Z"))}
+          order {:id "od_2QMi1ppumF"
+                 :status "COMPLETE"
+                 :currency "BTC"
+                 :totalAmount 2222
+                 :paidAt "2026-06-10T21:41:44Z"
+                 :label "Web Boost: TWIB 108 — Anonymous"
+                 :metadata {:app "web-boost" :username "Anonymous"}}]
+      (is (nil? (:settle-epoch (rec/invoice-pairing-target invoice))))
+      (is (true? (rec/pairs-with-complete? order (rec/invoice-pairing-target invoice)))))))
+
+(deftest test-resolve-manual-review
+  (testing "invoice-anchored resolve writes the settled payment with no order linkage
+            (the Memphis treatment: real receipt, dead source doc, blank message)"
+    (let [tmpdir (str "/tmp/test-reconcile-resolve-" (java.util.UUID/randomUUID))
+          conn (d/get-conn tmpdir db/schema)]
+      (try
+        (d/transact! conn
+                     [{:invoice/identifier "342724"
+                       :invoice/memo "Payment for Web Boost: LUP 670 — Memphis"
+                       :invoice/value 2222
+                       :invoice/settled true
+                       :invoice/settle_date "2026-08-07T03:36:14Z"
+                       :invoice/creation_date (.getEpochSecond (rec/parse-rfc3339 "2026-08-07T02:40:37Z"))}])
+        (let [result (rec/resolve-manual-review! conn "342724" nil)]
+          (testing "writes the boost"
+            (is (= :ok (:status result)))
+            (is (= "memphis" (:boostagram/sender_name_normalized (:entity result))))
+            (is (= 2222 (:boostagram/value_sat_total (:entity result))))
+            (is (nil? (:boostagram/message (:entity result)))
+                "no message — invoice-anchored write never invents one; remove-empty-vals drops the blank"))
+          (testing "entity carries the settled identity, no order linkage"
+            (let [entity (d/entity (d/db conn) [:invoice/identifier "342724"])
+                  attrs (into {} entity)]
+              (is (= "boost" (:boostagram/action attrs)))
+              (is (= :sat (:boostagram/type attrs)))
+              (is (= "nodecan" (:scraper/source attrs)))
+              (is (nil? (:boostagram/zaprite_order_id attrs)) "invoice-anchored, no fake order"))
+            (testing "idempotent — second resolve is already-boosted, no duplicate"
+              (is (= :already-boosted (:status (rec/resolve-manual-review! conn "342724" nil)))))))
+        (finally
+          (d/close conn)
+          (test-utils/delete-dir-recursively (io/file tmpdir))))))
+  (testing "unknown invoice is not-found"
+    (let [tmpdir (str "/tmp/test-reconcile-resolve-" (java.util.UUID/randomUUID))
+          conn (d/get-conn tmpdir db/schema)]
+      (try
+        (is (= :not-found (:status (rec/resolve-manual-review! conn "999999" nil))))
+        (finally
+          (d/close conn)
+          (test-utils/delete-dir-recursively (io/file tmpdir))))))
+  (testing "resolve with an order keeps metadata only, never payment state"
+    (let [tmpdir (str "/tmp/test-reconcile-resolve-" (java.util.UUID/randomUUID))
+          conn (d/get-conn tmpdir db/schema)]
+      (try
+        (d/transact! conn
+                     [{:invoice/identifier "777001"
+                       :invoice/memo "Payment for Web Boost: LUP 670 — Memphis"
+                       :invoice/value 2222
+                       :invoice/settled true
+                       :invoice/settle_date "2026-08-07T03:36:41Z"
+                       :invoice/creation_date (.getEpochSecond (rec/parse-rfc3339 "2026-08-07T03:12:00Z"))}])
+        (let [order {:id "od_bY1at35Vl9" :status "PENDING"
+                     :metadata {:app "web-boost" :username "Memphis"
+                                :message "Thanks for all the value! Web boost FTW"}}
+              result (rec/resolve-manual-review! conn "777001" order)]
+          (is (= :ok (:status result)))
+          (is (= "Thanks for all the value! Web boost FTW"
+                 (:boostagram/message (:entity result)))
+              "order metadata supplies the (client-captured) message")
+          (is (= 2222 (:boostagram/value_sat_total (:entity result)))))
+        (finally
+          (d/close conn)
+          (test-utils/delete-dir-recursively (io/file tmpdir)))))))
+
 
 (deftest test-content-identity-and-tie-break
   (let [target {:show-slug "lup" :show-ep "670" :username "memphis" :sats 2222}]

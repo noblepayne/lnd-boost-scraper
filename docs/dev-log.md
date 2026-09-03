@@ -7,6 +7,85 @@ Format: date · decision · why.
 
 ---
 
+## 2026-09-02 · Manual-review picks resolved — forensic finding + gated operator path
+
+### The forensic finding (what the three "picks" actually are)
+
+The three manual-review rows looked like "retry twins — pick the match." The
+evidence told a different story. Pulling **Zaprite `paidAt` for every order**
+and aligning against **LND `settle_date` for every invoice** produced a clean
+pairing table:
+
+| Invoice | Settled (LND) | Candidate order | paidAt (Zaprite) | Status |
+|---|---|---|---|---|
+| 323627 (Anon TWIB-108 2,222) | 06-11 02:14:48 | od_2QMi1ppumF | 06-10 21:41:44 | COMPLETE → paired to invoice **323503**, already boosted |
+| | | od_y7jTeGxbD1 | 06-11 03:36:03 | COMPLETE → paired to invoice **323628**, already boosted |
+| | | 4× PENDING | — | **`invoice: None`, `transactions: []` — never paid** |
+| 342724 (Memphis LUP-670 2,222) | 08-07 03:36:14 | od_vff0Bfkh8g / od_bY1at35Vl9 | — | PENDING, never held an invoice |
+| 327805 (Hydragyrum LUP-668 2,000) | 06-23 20:45:29 | od_hTEwY3DUVX | 06-23 21:30:34 | COMPLETE paid **45 min after** settle |
+| | | od_ujd5Yk70Kv | 06-23 21:34:09 | COMPLETE ↔ invoice 327806 (21:34:03) |
+
+Conclusions:
+- **All 7 PENDING candidates never initiated payment** (`invoice: None`,
+  `transactions: []`) — they are checkout-abandoned retries, not dead-webhook
+  orphans. The old guide's "one settles the invoice" premise was wrong.
+- **All 4 COMPLETE candidates were already boosted** under *different*
+  invoices. None paid the three target invoices.
+- Hydragyrum 327805 + 327806 ↔ its two COMPLETE orders — with a **45-minute
+  webhook lag** on the first (paidAt 21:30:34 vs LND settle 20:45:29).
+
+### The accounting treatment (ledger view)
+
+The DB is the ledger; LND settle is the cash receipt; Zaprite orders are the
+source documents (partly missing here). Per entry:
+
+- **Memphis 342724 — BOOK.** Real settled receipt, memo names Memphis/LUP-670,
+  and **no existing booking** exists. The rare genuine orphan. Message is
+  unrecoverable; a blank-message boost is honest, not invented.
+- **Anon 323627 — DO NOT BOOK.** Two identical-destination bookings already
+  exist (21:41 + 03:36). A third same-amount entry with no source document is
+  the textbook double-count risk. Conservative treatment: leave it.
+- **Hydragyrum 327805 — DO NOT BOOK.** Both COMPLETE orders already booked;
+  the 45-min webhook lag means 327805 IS od_hTEwY3DUVX's payment. Booking it
+  again would double-book. **The matcher's `pairs-with-complete?` window was
+  the bug** (creation-anchored, 600s → the 45-min lag fell outside).
+
+Net effect of the treatment: +2,222 sats booked (Memphis), nothing for Anon
+and Hydragyrum, ~4,222 sats remain intentionally unmatched by choice. The
+whole exposure (6,444 sats) is immaterial to totals; per-entity accuracy and
+no-double-count were the deciding principles.
+
+### What was implemented (gated, not hacky)
+
+1. **COMPLETE-pairing lag fix** — `invoice-pairing-target` now carries
+   `:settle-epoch` (LND settle is the authority; creation is the fallback) and
+   `pairs-with-complete?` anchors its gap on it. `pairing-window-seconds`
+   600 → 7200 (2h), documented with the measured 45-min lag. The window stays
+   bounded; same-user/same-show/same-amount orders 3h later still do NOT pair.
+2. **`resolve-manual-review!`** in `reconcile.clj` — the operator write path:
+   builds the boost from the settled invoice via the existing
+   `build-boost-entity` (nil order = invoice-anchored: sender from memo,
+   `message ""`, no `zaprite_order_id`, `source "nodecan"`; an order's
+   METADATA only is used when supplied). Upserts by `:invoice/identifier`;
+   idempotent (`:already-boosted` → 409), unknown → 404.
+3. **`POST /api/v1/reconcile/resolve`** in `web.clj` — gated by the same
+   `WEB_BOOST_RECONCILE_WRITE` flag as backfill (403 when off; the flag is
+   read per-request, so a resolve is a deliberate flag-on → resolve → flag-off
+   sequence). Broadcasts the write to the live feed like a normal boost.
+4. Tests: webhook-lag pairs now (45 min), 3h does not; resolve invoice-
+   anchored entity shape + idempotency + metadata-only-with-order; route 403/
+   400/404/200 and broadcast parity. **123 tests / 743 assertions green.**
+
+### The operator action (this deployment)
+
+1. Code deployed with the gate OFF → preview reclassified Hydragyrum as
+   already-boosted (manual-review 3 → 2). No writes.
+2. Gate ON (`WEB_BOOST_RECONCILE_WRITE=true`) → `POST /resolve {342724}` wrote
+   the Memphis boost → preview 2 → 1 (Anon only).
+3. Gate back OFF.
+4. `docs/orphan-reconcile-spec.md` unchanged (resolve complements, not
+   contradicts, the spec — the write-gate contract is identical).
+
 ## 2026-09-01 · Query proxy was a remote code execution backdoor — fixed + hardened
 
 ### Discovery (the "flexible query API" conversation)

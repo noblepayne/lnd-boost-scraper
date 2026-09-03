@@ -336,22 +336,29 @@
    api-key))
 
 (def pairing-window-seconds
-  "Max gap between invoice creation and COMPLETE paidAt for the pairing rule.
-   Observed gaps are ~5s-2min (polling confirm); 10min is generous but bounded."
-  600)
+  "Max gap between the invoice's anchoring time (LND settle, else creation)
+   and COMPLETE paidAt for the pairing rule. Observed gaps are ~5s-2min for
+   timely webhooks; 2h is generous but bounded to cover webhook-lag cases.
+   Measured live 2026-09-02: Hydragyrum LUP-668 (invoice 327805 settled
+   20:45:29, order od_hTEwY3DUVX paidAt 21:30:34) — a 45min webhook lag that
+   previously fell outside the old 600s window, leaving a false positive."
+  7200)
 
 (defn invoice-pairing-target
   "Extract the pairing key from a settled web-boost invoice:
-   normalized username, slug, ep, sats, creation epoch."
+   normalized username, slug, ep, sats, creation epoch, and — when recorded —
+   the LND settle epoch (the authority for pairing; falls back to creation)."
   [invoice]
   (let [parsed (parse-web-boost-memo (:invoice/memo invoice))
-        sats (coerce-sats (:invoice/value invoice))]
+        sats (coerce-sats (:invoice/value invoice))
+        settle-epoch (some-> (:invoice/settle_date invoice) parse-rfc3339 .getEpochSecond)]
     (when (and parsed sats (:invoice/creation_date invoice))
       {:username (db/normalize-name (:username parsed))
        :show-slug (:show-slug parsed)
        :show-ep (:show-ep parsed)
        :sats sats
-       :creation-epoch (:invoice/creation_date invoice)})))
+       :creation-epoch (:invoice/creation_date invoice)
+       :settle-epoch settle-epoch})))
 
 (defn order-tx-sats
   "True sats the customer actually paid, taken from the order's transaction
@@ -387,9 +394,11 @@
 (defn pairs-with-complete?
   "COMPLETE-pairing rule: an invoice is already-boosted when a COMPLETE order
    exists that represents the same payment, with a paidAt within the pairing
-   window of the invoice's creation. Zaprite marks COMPLETE only after its
-   polling observes settlement, so paidAt lands seconds-to-minutes after the
-   invoice's creation-time (observed ~5s-2min live).
+   window of the invoice's LND settle time (fallback: invoice creation).
+   Zaprite marks COMPLETE only after its polling observes settlement, so
+   paidAt lands seconds-to-minutes after settlement — but a lagging webhook
+   can stretch that to ~45min (see pairing-window-seconds), so the window is
+   bounded but generous.
 
    \"Same payment\" is tested by amount, and amount has two valid forms:
 
@@ -409,7 +418,7 @@
    card never has a BTC tx and still cannot pair (its sats-equivalent never
    touched nodecan)."
   [{:keys [status paidAt] :as order}
-   {:keys [username show-slug show-ep sats creation-epoch] :as _target}]
+   {:keys [username show-slug show-ep sats creation-epoch settle-epoch] :as _target}]
   (boolean
    (and (= "COMPLETE" status)
         paidAt
@@ -420,7 +429,11 @@
           (and (= show-slug (:show-slug par))
                (= show-ep (:show-ep par))))
         (when-let [paid (parse-rfc3339 paidAt)]
-          (let [gap (- (.getEpochSecond paid) creation-epoch)]
+          ;; Anchor on LND settle when recorded (authority), else creation.
+          ;; Webhook lag can push paidAt minutes after settle (observed 45min),
+          ;; so the window must be bounded but generous.
+          (let [anchor (or settle-epoch creation-epoch)
+                gap (- (.getEpochSecond paid) anchor)]
             (and (pos? gap) (<= gap pairing-window-seconds)))))))
 
 (defn pending-orders-query
@@ -589,6 +602,57 @@
                        (count (:orphans detection)))
                    0)]
      (assoc detection :written written))))
+
+(defn find-web-boost-invoice
+  "One settled web-boost invoice by identifier (nil when absent)."
+  [conn identifier]
+  (first (filter #(= identifier (:invoice/identifier %))
+                 (find-web-boost-invoices conn))))
+
+(defn resolve-manual-review!
+  "Operator resolution for a manual-review invoice (spec §11 Phase 3 — the
+   human pick the matcher refuses to guess).
+
+   Records the boost from the settled invoice itself: LND settlement is the
+   authority (§6 rule 3), the memo supplies username/show/episode, and the
+   amount is the settled sats. When `order` is supplied its METADATA only
+   (message, episode title) is used — payment state is never inferred from
+   the order. With `order` nil the boost is invoice-anchored (no
+   zaprite_order_id, message \"\"). This is the deliberate treatment for the
+   webhook-drop orphans: the money moved, the order never recorded it, and we
+   must not guess which retry twin was paid.
+
+   Gated: callers (the web route) must enforce WEB_BOOST_RECONCILE_WRITE.
+   Idempotent: upserts by :invoice/identifier; a resolve for an already-
+   boosted invoice returns {:status :already-boosted} and writes nothing.
+
+   Returns {:status :ok|:already-boosted|:not-found
+            :entity (broadcast keys, when :ok)}."
+  [conn identifier order]
+  (let [invoice (find-web-boost-invoice conn identifier)]
+    (cond
+      (nil? invoice)
+      {:status :not-found}
+
+      (contains? (:identifiers (find-boosted-keys conn)) identifier)
+      {:status :already-boosted}
+
+      :else
+      (let [parsed (parse-web-boost-memo (:invoice/memo invoice))
+            sats (coerce-sats (:invoice/value invoice))]
+        (when-not (and parsed sats)
+          (throw (ex-info (str "Resolve refused: unparseable memo or amount for invoice " identifier)
+                          {:identifier identifier :memo (:invoice/memo invoice)})))
+        (let [entity (build-boost-entity
+                      parsed
+                      {:invoice-id identifier
+                       :sats sats
+                       :settle-date (:invoice/settle_date invoice)
+                       :creation-date (epoch-to-rfc3339 (:invoice/creation_date invoice))}
+                      order)]
+          (d/transact! conn [entity])
+          {:status :ok
+           :entity (select-keys entity reconcile-broadcast-keys)})))))
 
 (defn reconcile-report
   "Deterministic markdown summary of a detect-orphans result."
