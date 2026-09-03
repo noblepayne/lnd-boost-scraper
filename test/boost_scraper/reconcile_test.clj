@@ -709,6 +709,24 @@
                     :label "Web Boost: LUP 668 — Hydragyrum"
                     :metadata {:app "web-boost" :username "Hydragyrum"}}]
       (is (false? (rec/pairs-with-complete? too-late (rec/invoice-pairing-target invoice))))))
+  (testing "the 81-min non-neighbor case does NOT pair (Anon TWIB-108: an order
+             paid at 03:36 belongs to its OWN invoice 323628 settled 03:35:58,
+             not to the invoice settled 81min earlier at 02:14:48)"
+    (let [invoice {:invoice/identifier "323627"
+                   :invoice/memo "Payment for Web Boost: TWIB 108 — Anonymous"
+                   :invoice/value 2222
+                   :invoice/creation_date (.getEpochSecond (rec/parse-rfc3339 "2026-06-11T02:13:26Z"))
+                   :invoice/settle_date "2026-06-11T02:14:48Z"}
+          other-invoice-owner {:id "od_y7jTeGxbD1"
+                               :status "COMPLETE"
+                               :currency "BTC"
+                               :totalAmount 2222
+                               :paidAt "2026-06-11T03:36:03Z"
+                               :label "Web Boost: TWIB 108 — Anonymous"
+                               :metadata {:app "web-boost" :username "Anonymous"}}]
+      (is (false? (rec/pairs-with-complete? other-invoice-owner
+                                            (rec/invoice-pairing-target invoice)))
+          "81min gap is outside the 1h window — one payment can't settle two invoices")))
   (testing "settle absent falls back to creation (pre-settle-date invoices)"
     (let [invoice {:invoice/identifier "323503"
                    :invoice/memo "Payment for Web Boost: TWIB 108 — Anonymous"

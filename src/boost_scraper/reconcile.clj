@@ -338,11 +338,13 @@
 (def pairing-window-seconds
   "Max gap between the invoice's anchoring time (LND settle, else creation)
    and COMPLETE paidAt for the pairing rule. Observed gaps are ~5s-2min for
-   timely webhooks; 2h is generous but bounded to cover webhook-lag cases.
-   Measured live 2026-09-02: Hydragyrum LUP-668 (invoice 327805 settled
-   20:45:29, order od_hTEwY3DUVX paidAt 21:30:34) — a 45min webhook lag that
-   previously fell outside the old 600s window, leaving a false positive."
-  7200)
+   timely webhooks. Must (a) capture the measured 45min webhook lag
+   (Hydragyrum LUP-668: invoice 327805 settled 20:45:29, order od_hTEwY3DUVX
+   paidAt 21:30:34), yet (b) NOT capture the 81min non-neighbor case (Anon
+   TWIB-108: order od_y7jTeGxbD1 paid 03:36 belongs to ITS OWN invoice 323628
+   settled 03:35:58, not to invoice 323627 settled 02:14:48 — 81min earlier).
+   1h (3600s) is the validated middle: 45min lag in, 81min non-neighbor out."
+  3600)
 
 (defn invoice-pairing-target
   "Extract the pairing key from a settled web-boost invoice:

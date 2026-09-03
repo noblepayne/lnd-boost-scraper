@@ -60,8 +60,11 @@ no-double-count were the deciding principles.
 1. **COMPLETE-pairing lag fix** — `invoice-pairing-target` now carries
    `:settle-epoch` (LND settle is the authority; creation is the fallback) and
    `pairs-with-complete?` anchors its gap on it. `pairing-window-seconds`
-   600 → 7200 (2h), documented with the measured 45-min lag. The window stays
-   bounded; same-user/same-show/same-amount orders 3h later still do NOT pair.
+   600 → **3600 (1h)** — validated on live data from both directions: the
+   45-min Hydragyrum webhook lag must pair (in), and the Anon 81-min
+   non-neighbor must NOT (out; one payment can't settle two invoices). The
+   window stays bounded; same-user/same-show/same-amount orders 1h+ later do
+   not pair.
 2. **`resolve-manual-review!`** in `reconcile.clj` — the operator write path:
    builds the boost from the settled invoice via the existing
    `build-boost-entity` (nil order = invoice-anchored: sender from memo,
