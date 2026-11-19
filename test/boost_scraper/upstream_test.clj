@@ -70,6 +70,30 @@
   (testing "no transactions returns unknown"
     (is (= "unknown" (zaprite/infer-payment-rail {})))))
 
+(deftest test-process-order-campaign-attribution
+  (testing "a campaign picked on the web-boost form lands on the entity"
+    (let [order {:id "ord-camp"
+                 :totalAmount 1000
+                 :currency "BTC"
+                 :paidAt "2026-11-20T12:00:00.000Z"
+                 :transactions [{:method "LIGHTNING"}]
+                 :metadata {:app "web-boost" :podcastName "LINUX Unplugged"
+                            :episodeTitle "694: Test" :username "booster"
+                            :message "For the 700 club" :campaign "lup-700-brent"}}
+          entity (zaprite/process-order order)]
+      (is (= "lup-700-brent" (:boostagram/campaign entity)))))
+  (testing "an ordinary boost carries no campaign"
+    (let [order {:id "ord-plain"
+                 :totalAmount 1000
+                 :currency "BTC"
+                 :paidAt "2026-11-20T12:00:00.000Z"
+                 :transactions [{:method "LIGHTNING"}]
+                 :metadata {:app "web-boost" :podcastName "LINUX Unplugged"
+                            :episodeTitle "694: Test" :username "booster"
+                            :message "Great show"}}
+          entity (zaprite/process-order order)]
+      (is (nil? (:boostagram/campaign entity))))))
+
 (deftest test-process-order
   (testing "BTC order"
     (let [order {:id "ord-123"

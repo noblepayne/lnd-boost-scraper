@@ -37,12 +37,14 @@
                                               ; so a holiday slip doesn't cut it off
                      :closes-note "Expected LUP 700: Sunday 2027-01-03"}
 
-   ;; A boost counts if EITHER the episode is 700 OR the message carries the tag.
-   ;; The hashtag is what makes pre-episode fundraising possible (694-699);
-   ;; the episode match carries the finale without requiring the tag.
+   ;; A boost counts if any of these match. Order is preference, not priority:
+   ;; 1. the web-boost form attributed it (a dropdown — exact, untypable),
+   ;; 2. the message carries the tag (works from any podcast app),
+   ;; 3. it lands on the finale episode (carries 700 without extra effort).
    :campaign/matcher
-   {:any-of [{:type :episode :show "lup" :episode "700"}
-             {:type :message :regex "(?i)#\\s*700\\s*club"}]}
+   {:any-of [{:type :campaign :value "lup-700-brent"}
+             {:type :message :regex "(?i)#\\s*700\\s*club"}
+             {:type :episode :show "lup" :episode "700"}]}
 
    ;; --- money ---
    :campaign/target {:fiat-cents 150000}      ; USD 1,500
