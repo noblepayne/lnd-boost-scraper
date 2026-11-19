@@ -60,6 +60,20 @@ segment cannot drift with the price). `members` counts member-free boosts
 weeks with at least one member boost) — a good "most loyal member" angle.
 `combined.sats` is boosts + streams only; fiat stays separate by design.
 
+**The anonymity bucket is not a person.** `anonymous` is one string used by
+many different people, so it never occupies a leaderboard slot — but its money
+is real. It is excluded from every ranked board and reported once:
+
+```json
+"anonymous": {"events": 89, "sats": 120180, "fiat-cents": 5000}
+```
+
+`totals.*.people` counts distinct **named** handles only, so the bucket cannot
+inflate a "N people supported us" claim. Machine-issued per-install handles
+(`user183420225038226`, `N/A`) are likewise unrankable and are kept separate
+from the anonymity number. The same rule is available to every lens as
+`contributions/handle-class` → `:named` / `:anonymous` / `:auto`.
+
 Boosts and streams are separate acts; a person who does both appears in each
 board and is counted once in `combined.people`.
 

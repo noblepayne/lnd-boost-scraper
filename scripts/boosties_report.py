@@ -109,6 +109,15 @@ def render(d, show):
     A(f"+ Total Boosted Sats: {n(t['boosts']['sats'])}")
     A(f"+ Total Boosts: {n(t['boosts']['events'])}")
     A(f"+ Total Boosters: {n(t['boosts']['people'])}")
+    anon = d.get("anonymous") or {}
+    if anon.get("events"):
+        parts = []
+        if anon.get("sats"):
+            parts.append(f"{n(anon['sats'])} sats")
+        if anon.get("fiat-cents"):
+            parts.append(f"${anon['fiat-cents']/100:,.2f}")
+        A(f"+ Anonymous Boosts: {n(anon['events'])} ({', '.join(parts)}) "
+          "— counted, not ranked")
     if t.get("fiat") and t["fiat"].get("fiat-cents"):
         A(f"+ Total Fiat Boosts: ${t['fiat']['fiat-cents']/100:,.2f} "
           f"({n(t['fiat']['events'])} boosts, {n(t['fiat']['people'])} people)")
