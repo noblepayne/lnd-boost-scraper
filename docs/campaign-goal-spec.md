@@ -313,20 +313,16 @@ fundraising possible (eps 694-699), episode match covers the finale, and
 neither needs a widget change. The `:tag` form reserves the clean path for
 when the web-boost widget can emit a campaign field.
 
-### 4.3 Lens semantics — the product question
+### 4.3 Lens semantics — **DECIDED 2026-11-19: lens, not ring-fence**
 
-**Decision required:** is a campaign a *lens* or a *ring-fence*?
+Campaign-tagged boosts are ordinary show support that *also* count toward the
+goal. Nothing is siphoned; the meter answers "how much of our support was for
+this". No new payment path, no accounting split, works with the web boost as-is.
 
-- **Lens (recommended):** campaign-tagged boosts are ordinary show support
-  that also count toward the goal. Nothing is siphoned; the meter answers
-  "how much of our support was for this". No new payment path, no accounting
-  split, works with the web boost as-is.
-- **Ring-fence:** a separate checkout whose money is earmarked. Cleaner
-  promises ("your $20 goes only to the trip") but needs a separate payment
-  flow and separate accounting, and splits the audience's giving.
-
-Recommendation: ship the lens first (it is honest and cheap), and only build
-ring-fencing if a fundraiser genuinely requires earmarking.
+Ring-fencing (a separate checkout whose money is earmarked) stays available but
+is **not** the default: it needs a deliberate decision per campaign, because it
+splits the audience's giving and doubles the accounting. See
+`docs/roadmap.md` → Decided.
 
 ---
 
@@ -367,10 +363,10 @@ The campaign model knows nothing about hosting.
 | Public meter | JSON artifact → R2 (public read) → static page fetches it |
 | Future | showfactory pulls the internal API; or a dedicated checkout |
 
-**Do not expose the scraper publicly.** It carries a query API and reconcile
-routes; a static artifact removes that entire surface. A tunnel is acceptable
-only for a single read-only path behind an authenticated edge, and even then
-the artifact is simpler.
+**Do not expose the scraper publicly — DECIDED 2026-11-19.** It carries a query
+API and reconcile routes; a static artifact removes that entire surface. A
+tunnel is tempting and wrong for a public meter; if "live" is ever needed, put a
+proxy (showfactory) in front of the internal API instead.
 
 Cadence: publish every 1-5 minutes. Staleness is irrelevant for a thermometer;
 if "live" is ever needed, the page can poll a cached artifact.
@@ -405,20 +401,25 @@ if "live" is ever needed, the page can poll a cached artifact.
 
 ## 8. Open decisions for review
 
-1. **Lens vs ring-fence** (§4.3) — recommend lens.
-2. **Do fiat boosts count** toward campaign progress? Recommend yes, reported
+**Decided 2026-11-19** (see `docs/roadmap.md`): lens-not-ring-fence (§4.3),
+publish-artifacts-not-process (§6), anonymity-is-a-bucket, 2026 LA window.
+
+Still open:
+
+1. **Do fiat boosts count** toward campaign progress? Recommend yes, reported
    as a separate USD line (they are real money and the target is USD).
-3. **Do `:member-free` boosts count?** Recommend: count contributors/presence,
+2. **Do `:member-free` boosts count?** Recommend: count contributors/presence,
    not value.
-4. **Do streams count?** Recommend no for fundraisers (they are ambient
+3. **Do streams count?** Recommend no for fundraisers (they are ambient
    listen-through), and make it policy so TWiB can choose otherwise.
-5. **Identity scope now** — the layered pipeline (§3) with deterministic
+4. **Identity scope now** — the layered pipeline (§3) with deterministic
    auto-merges + a review queue. Recommend building passes 0–2 (deterministic)
    and the *exposure* endpoints first; the review queue can be worked later.
    It is measured — `sender_id` already exists in 353k rows, so the strong
    evidence is available without any new intake.
-6. **Target currency** — recommend USD-cents canonical with sats derived (§4.1).
-7. **Publish host** — R2 static page vs Cloudflare Pages vs showfactory.
+5. **Target currency** — recommend USD-cents canonical with sats derived (§4.1).
+6. **Publish host** — R2 static page vs Cloudflare Pages vs showfactory.
+7. **Schema endpoint** — committed (`GET /api/v1/schema`), see roadmap item 2.
 
 ---
 

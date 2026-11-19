@@ -7,6 +7,44 @@ Format: date · decision · why.
 
 ---
 
+## 2026-11-19 · Architecture decisions: lens, artifacts, schema endpoint, lens refactor
+
+Recorded so they are not re-litigated, and so the follow-ups survive context
+loss. Full list with rationale: `docs/roadmap.md`.
+
+### Decided
+
+1. **Campaigns are a lens, not a ring-fence.** Campaign-tagged boosts are
+   ordinary support that *also* count toward the goal. No separate payment
+   path, no split accounting. Ring-fencing stays available as a per-campaign
+   decision, never the default.
+2. **Publish artifacts, never expose the process.** Public meters read a static
+   JSON artifact (R2 → static page). The scraper's query API and reconcile
+   routes never face the internet. If live data is ever needed, a proxy sits in
+   front of the internal API.
+3. **`GET /api/v1/schema` is committed** — attributes with types, uniqueness,
+   cardinality and example values, including undeclared-but-present attributes
+   (that omission is exactly how `:boostagram/sender_id` sat unnoticed on
+   353k rows). Goal: a bot can write correct Datalog from the API alone.
+4. **Feed and reports will move onto the accounting core** when they are next
+   touched. Boosties proved the method: rebuild on `contributions`, prove the
+   totals match on fixed windows, then switch. Rationale: they still carry
+   their own query paths and can therefore drift from the meter — the precise
+   failure the core exists to prevent.
+
+### Context: what prompted this
+
+Boosties was rebuilt on `contributions` today. The sats total reproduced
+**exactly** (14,165,036) while 225 duplicate/non-boost records fell away, and
+the rebuild surfaced the fiat/member/anonymous handling that the old ad-hoc
+queries could not express. That is the evidence that the core approach works
+and that the remaining lenses should follow it.
+
+Also captured this session: `docs/datalog-tips.md` — measured Datalog/Datalevin
+lessons (engine-side aggregation, the `get-else` cost cliff, `pull` row shape
+and `:db/id`, declared-vs-undeclared attributes, resolver security), so we stop
+hand-rolling what the engine already does.
+
 ## 2026-11-19 · Open items — consolidated watchlist (post-2.5-month regrounding)
 
 Re-grounded after a gap (last entry 2026-09-02). State snapshot:
