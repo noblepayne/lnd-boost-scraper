@@ -120,7 +120,8 @@
                 {:handle handle
                  :handle-class (handle-class handle)
                  :count (long cnt)
-                 :sats (long (or sats 0))}))
+                 :sats (long (or sats 0))
+                 :fiat-cents 0}))
          (remove (fn [{:keys [handle]}]
                    (and (not include-auto?) (auto-generated-handle? handle))))
          (remove (fn [{:keys [handle]}]
