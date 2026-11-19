@@ -76,6 +76,42 @@
         (not (str/blank? (str iid))) (str "invoice:" iid)
         :else (str "entity:" e)))
 
+(def ^:private aggregate-query
+  "Server-side rollup for a high-volume action (streams). Returns per-handle
+   count + sats without materializing 38k entity maps."
+  '[:find ?sender (count ?e) (sum ?sats)
+    :in $ ?since ?until ?regex ?action
+    :where
+    [?e :boostagram/action ?action]
+    [?e :invoice/creation_date ?cd]
+    [(>= ?cd ?since)]
+    [(<= ?cd ?until)]
+    [?e :boostagram/podcast ?podcast]
+    [(re-matches ?regex ?podcast) _]
+    [?e :boostagram/sender_name_normalized ?sender]
+    [?e :boostagram/value_sat_total ?sats]])
+
+(defn aggregate-by-handle
+  "Per-handle rollup for one action, computed in the query engine.
+
+   Exists so lenses over high-volume actions (streams: ~38k rows/window) do not
+   pay to materialize every contribution. Uses the same field and filters as
+   `contributions`, so the money rule is unchanged."
+  [conn {:keys [from to show-regex action exclude-self? include-auto?]
+         :or   {action :stream exclude-self? true include-auto? true}}]
+  (let [regex (cond (instance? java.util.regex.Pattern show-regex) show-regex
+                    (string? show-regex) (re-pattern show-regex)
+                    :else (re-pattern ".*"))]
+    (->> (d/q aggregate-query (d/db conn) (long from) (long to) regex (name action))
+         (map (fn [[handle cnt sats]]
+                {:handle handle :count (long cnt) :sats (long (or sats 0))}))
+         (remove (fn [{:keys [handle]}]
+                   (and (not include-auto?) (auto-generated-handle? handle))))
+         (remove (fn [{:keys [handle]}]
+                   (and exclude-self?
+                        (contains? self-boosters (some-> handle str/lower-case)))))
+         vec)))
+
 (defn- ->contribution
   "Normalize one pulled entity map into a contribution."
   [m]

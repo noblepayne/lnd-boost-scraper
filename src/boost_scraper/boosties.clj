@@ -85,26 +85,30 @@
   [conn {:keys [limit since-epoch include-self?] :or {limit 10} :as opts}]
   (let [limit (long limit)
         {:keys [from to]} (window since-epoch)
-        cs (c/contributions conn {:from from :to to
-                                  :show-regex (:regex opts)
-                                  :actions #{:boost :stream}
-                                  :exclude-self? (not include-self?)})
-        by-action (group-by :contribution/action cs)
-        boosts (get by-action :boost [])
-        streams (get by-action :stream [])
-        sat-boosts (filter #(= :sat (:contribution/type %)) boosts)
-        fiat-boosts (filter #(= :fiat (:contribution/type %)) boosts)
-        member-boosts (filter #(= :member-free (:contribution/type %)) boosts)
-        sat-streams (filter #(= :sat (:contribution/type %)) streams)
+        self-excluded? (not include-self?)
+        contributions (c/contributions conn {:from from :to to
+                                             :show-regex (:regex opts)
+                                             :actions #{:boost}
+                                             :exclude-self? self-excluded?})
+        streams (c/aggregate-by-handle conn {:from from :to to
+                                             :show-regex (:regex opts)
+                                             :action :stream
+                                             :exclude-self? self-excluded?})
+        sat-boosts (filter #(= :sat (:contribution/type %)) contributions)
+        fiat-boosts (filter #(= :fiat (:contribution/type %)) contributions)
+        member-boosts (filter #(= :member-free (:contribution/type %)) contributions)
         sat-rows (aggregate sat-boosts)
         fiat-rows (map with-usd (aggregate fiat-boosts))
         member-rows (aggregate member-boosts)
-        stream-rows (aggregate sat-streams)
-        t-summary summary
-        sat-t (t-summary sat-boosts)
-        fiat-t (t-summary fiat-boosts)
-        member-t (t-summary member-boosts)
-        stream-t (t-summary sat-streams)]
+        sat-t (summary sat-boosts)
+        fiat-t (summary fiat-boosts)
+        member-t (summary member-boosts)
+        stream-t {:events (reduce + 0 (map :count streams))
+                  :sats (reduce + 0 (map :sats streams))
+                  :fiat-cents 0
+                  :people (count streams)}
+        people (count (into (into #{} (map :handle sat-rows))
+                            (map :handle streams)))]
     {:show-regex (str (:regex opts ".*"))
      :since from
      :limit limit
@@ -115,8 +119,8 @@
             :by-count (vec (rank fiat-rows :count limit))}
      :members {:by-count (vec (rank member-rows :count limit))
                :by-weeks (vec (rank member-rows :weeks limit))}
-     :streams {:by-sats (vec (rank stream-rows :sats limit))
-               :by-count (vec (rank stream-rows :count limit))}
+     :streams {:by-sats (vec (rank streams :sats limit))
+               :by-count (vec (rank streams :count limit))}
      :totals {:boosts sat-t
               :fiat fiat-t
               :members member-t
@@ -124,4 +128,4 @@
               ;; "total v4v" = every sats-bearing event; fiat stays separate
               :combined {:sats (+ (:sats sat-t) (:sats stream-t))
                          :events (+ (:events sat-t) (:events stream-t))
-                         :people (:people (t-summary (concat sat-boosts sat-streams)))}}}))
+                         :people people}}}))
