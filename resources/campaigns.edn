@@ -1,0 +1,61 @@
+;; Campaigns — boilerplate-free fundraising/engagement goals.
+;;
+;; GOVERNING DECISIONS (2026-11-19, see docs/campaign-goal-spec.md §8):
+;;  - A campaign is a LENS, not a ring-fence: tagged boosts are ordinary show
+;;    support that ALSO count toward the goal. No separate payment path.
+;;  - Sats and fiat are both real money and both count, reported separately.
+;;    Member-free boosts count as presence (contributors), not value.
+;;    Streams are excluded by default (policy, per campaign).
+;;  - The target is canonical in USD CENTS. The flight costs dollars; sats are
+;;    derived at snapshot time and labelled, so a BTC move cannot silently
+;;    move the goal.
+;;  - Publishing is a static JSON artifact (never the scraper itself).
+;;
+;; All times are epoch seconds. Windows are inclusive of :opens, exclusive of
+;; :closes. Times below are midnight America/Los_Angeles.
+
+{:campaigns
+ [{:campaign/slug "lup-700-brent"
+
+   ;; --- public copy (first draft; edit freely) ---
+   :campaign/title "Get Brent in the Studio for LUP 700"
+   :campaign/description
+   (str "Brent has been part of this ride since the beginning. For episode 700 "
+        "we want him in the studio with Chris — in person, not over a link. "
+        "That means a flight and a place to stay, and we're tight right now.\n\n"
+        "Boost anything from episodes 694 through 700 with #700club in the "
+        "message, and it counts toward getting him here. Regular boosts still "
+        "support the show exactly as they always have — this is the same "
+        "support with a name on it. If we hit the goal, 700 happens in the "
+        "same room.")
+
+   ;; --- what qualifies ---
+   :campaign/scope {:shows #{"lup"}}
+   :campaign/window {:opens 1795075200        ; 2026-11-19 00:00 America/Los_Angeles
+                     :closes 1799654400       ; 2027-01-11 00:00 LA — a week past
+                                              ; the expected ep-700 airdate (Jan 3)
+                                              ; so a holiday slip doesn't cut it off
+                     :closes-note "Expected LUP 700: Sunday 2027-01-03"}
+
+   ;; A boost counts if EITHER the episode is 700 OR the message carries the tag.
+   ;; The hashtag is what makes pre-episode fundraising possible (694-699);
+   ;; the episode match carries the finale without requiring the tag.
+   :campaign/matcher
+   {:any-of [{:type :episode :show "lup" :episode "700"}
+             {:type :message :regex "(?i)#\\s*700\\s*club"}]}
+
+   ;; --- money ---
+   :campaign/target {:fiat-cents 150000}      ; USD 1,500
+
+   ;; --- policy: what the meter counts ---
+   :campaign/policy {:actions #{:boost}       ; no streams
+                     :count-fiat? true        ; dollars count toward a dollar goal
+                     :count-member-free? false ; presence, not value
+                     :exclude-self? true}     ; chrislas / noblepayne
+
+   ;; --- call to action on the public page ---
+   :campaign/cta {:label "Boost with #700club"
+                  :url "https://boost.jupiterbroadcasting.com/"
+                  :hint "Add #700club to your boost message so it counts."}
+
+   :campaign/state :auto}]}                   ; state derives from the window
