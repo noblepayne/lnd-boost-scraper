@@ -120,46 +120,148 @@ layer.
 
 ---
 
-## 3. Identity — `person`
+## 3. Identity — `person`, `identity`, `handle`
 
-Handle strings are noisy. Observed in the live data:
+Handle strings are noisy, and — critically — **identity resolution cannot be
+complete**, because one human legitimately spans several wallets and nodes.
+A person who uses Fountain, then Castamatic, then a fresh node is *the same
+person* with three unrelated IDs.
+
+So identity is not a lookup. It is a **three-layer, evidence-scored graph**
+with reviewable, reversible merges.
+
+### 3.0 What the live data actually contains (measured 2026-11-19)
+
+| Fact | Number |
+|---|---|
+| Rows carrying `:boostagram/sender_id` | **353,204** (stored by the generic flattener; never read until now) |
+| `sender_id` → multiple handles | **271** ids |
+| Handles → multiple `sender_id`s | **53** handles |
+| Deterministic base-variant groups (`name` ↔ `name@fountain.fm`) | **231** |
+
+`sender_id` is **client-native and client-scoped**:
+
+- Fountain → nostr **npub** (`npub1mwsk3ly4…`) or short IDs (`yLkNlRLDSrwNc2SYJYvO`)
+- Castamatic → **UUIDs**, and they **rotate**: `genebean` has **201** distinct IDs
+- One ID was observed spanning unrelated names (`bmwvroomvroom` + `mrborkander`)
+  → client-level ID reuse or a shared device
+
+**Consequences that shape the design:**
+
+1. A shared `sender_id` is **strong grouping evidence**.
+2. A *different* `sender_id` is **not evidence of different people** (multi-wallet norm).
+3. A shared `sender_id` alone must **never** auto-merge (device sharing / client reuse).
+4. "Unknown" must be a first-class state. Guessing is worse than a split row.
+
+### 3.1 Model — person ↔ identity ↔ handle
 
 ```
-thedudeabides          thedudeabides@fountain.fm
-biggles                biggles@fountain.fm
-r-podcast              r-podcast (eric)
-odysseywestra          odysseywestra@fountain.fm
+person    { :person/id "p-…"  :person/display-name "genebean" }
+
+identity  { :identity/id     "id-…"          ; one wallet/node/app identity
+            :identity/kind   :nostr-npub | :client-uuid | :client-short | :unknown
+            :identity/app    "Fountain" | "Castamatic" | …
+            :identity/raw    "npub1mwsk3ly4…" }
+
+handle    { :handle/normalized "genebean@fountain.fm"
+            :handle/raw        "genebean@fountain.fm"
+            :handle/person     "p-…" | nil      ; nil = unresolved
+            :handle/identity   "id-…" | nil }
+
+decision  { :decision/kind   :merge | :split | :reject | :alias
+            :decision/from   "p-…"
+            :decision/to     "p-…"
+            :decision/source :auto | :review | :manual
+            :decision/confidence 0.0-1.0
+            :decision/evidence {…}       ; snapshot of why
+            :decision/at     epoch
+            :decision/by     "wes" | "auto" }
 ```
 
-Today these are separate leaderboard rows. For a "who funded it" list and for
-fair rankings, one human should be one row.
+The mapping is **many-to-many by nature**: a person has N identities, an
+identity has N handles, a handle can be re-pointed by a later decision.
 
-### 3.1 Model
+### 3.2 The pipeline — four passes, each narrower
+
+**Pass 0 — normalize (deterministic, always on).**
+lowercase · trim · strip leading `@` · strip `@<app>` suffix · strip trailing
+parenthetical · fold separators (`-` `_` `.` → nothing) · collapse whitespace.
+Produces `handle_base`. This alone resolves the 231 base-variant groups
+(`name` ↔ `name@fountain.fm`) with no judgment.
+
+**Pass 1 — identity edges (deterministic, evidence only).**
+For every `(sender_id, handle_base)` observation, record an edge. Same
+`sender_id` appearing with several bases is an edge *candidate*, not a merge.
+
+**Pass 2 — scoring + auto-merge (conservative).**
+Auto-merge only when evidence is unambiguous:
+
+| Evidence | Action |
+|---|---|
+| Same `handle_base`, differing only by `@app`/case/separators | **auto-merge** |
+| Same `handle_base` **and** same `sender_id` | **auto-merge** |
+| Same `sender_id`, unrelated bases | **review** (device/client reuse risk) |
+| Different `sender_id`, same base | auto-merge the handles; identities stay separate under one person |
+| Different `sender_id`, different base | **no merge** — this is the multi-wallet case, not a bug |
+| `anonymous`, `user<digits>`, `N/A` | **never auto-merge** |
+
+**Pass 3 — review queue (the secondary pass).**
+Everything ambiguous, with an **evidence bundle** designed to be judged by a
+human *or* an LLM: shared identities, app/source mix, first/last seen,
+temporal handoff (does A stop exactly when B starts?), episode overlap,
+amount similarity, counts.
+
+**Pass 4 — decisions.**
+Every merge/split is recorded as an append-only `decision` with its evidence.
+Splits are first-class. We never rewrite boost entities — resolution is
+recomputed from the decision log, so any decision can be reversed and history
+stays intact.
+
+### 3.3 Exposure for a secondary pass
+
+The graph must be **inspectable and adjudicable via API**, not buried in code:
 
 ```
-person  { :person/id "p-uuid"  :person/display-name "thedudeabides"
-          :person/aliases #{"thedudeabides" "thedudeabides@fountain.fm"} }
-
-alias   { :alias/normalized "thedudeabides"
-          :alias/person "p-uuid"  :alias/source :derived | :manual }
+GET  /api/v1/identity/handles                       ; every handle + stats + edges
+GET  /api/v1/identity/handles?unresolved=true       ; the work queue
+GET  /api/v1/identity/candidates?min-confidence=0.5 ; proposed groups + evidence
+GET  /api/v1/identity/person/:id                    ; person, identities, handles, decisions
+GET  /api/v1/identity/export.jsonl                  ; offline review bundle (LLM-friendly)
+POST /api/v1/identity/decision                      ; merge | split | reject | alias
+     { "kind":"merge", "handles":["a","a@fountain.fm"], "reason":"…" }
 ```
 
-### 3.2 Resolution (composable, in order)
+`POST` is **write-gated exactly like reconcile** (`WEB_BOOST_RECONCILE_WRITE`
+or a dedicated flag), so identity changes are deliberate operator actions, never
+background surprises. Responses are idempotent; `409` on a no-op.
 
-1. **Exact alias** (already mapped) → person.
-2. **Deterministic normalization** → strip `@<app>` suffix, strip trailing
-   parenthetical, lowercase, collapse whitespace. If a prior alias matches,
-   bind it (source `:derived`).
-3. **Manual alias** — an operator mapping for the exceptions
-   (`r-podcast` / `r-podcast (eric)`), stored in config, reviewable.
-4. **Unclaimed** — otherwise a stable person keyed off the raw handle. Never
-   drop a contribution because identity is unknown.
+### 3.4 Intake improvements (fix the root cause where we can)
 
-### 3.3 Guardrail
+The noise originates upstream — handle strings are client-supplied and
+unverified — but we can stop *losing* signal:
 
-Derived aliases are **append-only evidence**, never destructive: we record
-"this handle resolved to this person at this time". If a merge turns out
-wrong, we can split it. Never rewrite historical boosts.
+1. **Declare `:boostagram/sender_id` in the schema** (it is already persisted
+   via generic flattening; declaring it documents intent, makes it indexed and
+   queryable, and lets us add `:identity/kind`).
+2. **Persist the raw boostagram JSON for `action = "boost"`** (≈6.3k rows and
+   growing slowly; streams stay flattened). Today the raw payload is decoded
+   and discarded, so any future heuristic is limited to what we happened to
+   flatten. At this volume the storage cost is trivial and it makes later
+   identity/heuristics passes possible without a schema migration.
+3. **Store the app name alongside the identity** — it determines ID semantics
+   (npub vs rotating UUID), which is exactly the context needed to judge a
+   candidate merge.
+
+### 3.5 Guardrails
+
+- **Never destructive.** Decisions are append-only; boosts are immutable.
+- **Never guess silently.** An unresolved handle is a valid outcome.
+- **Never merge on `sender_id` alone.** Device sharing is real.
+- **Never merge auto-generated handles** (`anonymous`, `user####`).
+- **Resolution is optional for lenses.** Contributions always carry the raw
+  handle; a lens may use `person` when available and fall back to the handle.
+  Identity enrichment must never block a report or a goal meter.
+
 
 ---
 
@@ -310,9 +412,11 @@ if "live" is ever needed, the page can poll a cached artifact.
    not value.
 4. **Do streams count?** Recommend no for fundraisers (they are ambient
    listen-through), and make it policy so TWiB can choose otherwise.
-5. **Identity scope now** — full deterministic + manual aliases, or exact-only
-   for v1? Recommend deterministic + manual; it is a small table and it fixes
-   a visible split in today's leaderboards.
+5. **Identity scope now** — the layered pipeline (§3) with deterministic
+   auto-merges + a review queue. Recommend building passes 0–2 (deterministic)
+   and the *exposure* endpoints first; the review queue can be worked later.
+   It is measured — `sender_id` already exists in 353k rows, so the strong
+   evidence is available without any new intake.
 6. **Target currency** — recommend USD-cents canonical with sats derived (§4.1).
 7. **Publish host** — R2 static page vs Cloudflare Pages vs showfactory.
 
