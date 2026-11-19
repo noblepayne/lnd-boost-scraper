@@ -244,7 +244,7 @@
                            :headers {"content-type" "application/json"}
                            :body (json/generate-string {:error (str "Invalid show: " show)})}
                           (try
-                            (let [result (boosties/payload db-conn
+                            (let [result (boosties/cached-payload db-conn
                                                            (cond-> {:regex show-regex
                                                                     :include-self? include-self?}
                                                              since (assoc :since-epoch since)

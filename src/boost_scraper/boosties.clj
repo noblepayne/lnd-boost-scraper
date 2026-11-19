@@ -24,6 +24,17 @@
 
 (def ^:private week-seconds (* 7 86400))
 
+(def ^:private cache
+  "Segment endpoint cache: {key [epoch-seconds payload]}. A boosties board is
+   read a handful of times per episode; recomputing 38k stream rows per request
+   is wasted work. TTL keeps it fresh for on-air use."
+  (atom {}))
+
+(def ^:private cache-ttl-seconds 60)
+
+(defn- cache-key [{:keys [regex since-epoch limit include-self?]}]
+  [(str regex) (long (or since-epoch default-since)) (long (or limit 10)) (boolean include-self?)])
+
 (defn- week-bucket [epoch] (quot (long epoch) week-seconds))
 
 (defn- window [since-epoch]
@@ -73,6 +84,20 @@
          aggregate
          (sort-by (juxt (comp - :sats) :handle))
          (map (fn [r] {:sender (:handle r) :count (:count r) :sats (:sats r)})))))
+
+(declare payload)
+
+(defn cached-payload
+  "`payload` with a short TTL cache (60s). Use this from the HTTP layer."
+  [conn opts]
+  (let [k (cache-key opts)
+        now (quot (System/currentTimeMillis) 1000)
+        [at v] (get @cache k)]
+    (if (and v (< (- now at) cache-ttl-seconds))
+      v
+      (let [p (payload conn opts)]
+        (swap! cache assoc k [now p])
+        p))))
 
 (defn payload
   "The full Boosties payload.
