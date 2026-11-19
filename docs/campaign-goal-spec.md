@@ -399,27 +399,27 @@ if "live" is ever needed, the page can poll a cached artifact.
 
 ---
 
-## 8. Open decisions for review
+## 8. Decisions
 
-**Decided 2026-11-19** (see `docs/roadmap.md`): lens-not-ring-fence (§4.3),
-publish-artifacts-not-process (§6), anonymity-is-a-bucket, 2026 LA window.
+**Decided 2026-11-19** (locked with Wes; see `docs/roadmap.md`):
 
-Still open:
+1. **Attribution: `#700club` tag OR episode 700.** The hashtag enables
+   pre-episode fundraising (eps 694–699); boosting ep 700 itself also counts.
+   No widget change required. `{:any-of [{:type :episode …} {:type :message …}]}`
+2. **What counts: sats boosts + fiat boosts. Member-free counts as presence
+   (contributors) but not value. Streams excluded** (policy, so TWiB can flip).
+3. **Target currency: USD cents canonical**, sats derived at snapshot rate and
+   labelled as such — a BTC move cannot silently change the goal.
+4. **Publishing: static JSON artifact → R2 → static page.** Scraper never
+   exposed; one JSON per campaign, reusable for Planet Nix/SCaLE.
+5. **Identity scope: deterministic passes + exposure endpoints** ship with
+   campaigns; the review queue is worked later, continuously.
+6. **Lens, not ring-fence** (§4.3) and **artifacts, not the process** (§6).
+7. **Schema endpoint** — shipped (`GET /api/v1/schema`), see roadmap.
 
-1. **Do fiat boosts count** toward campaign progress? Recommend yes, reported
-   as a separate USD line (they are real money and the target is USD).
-2. **Do `:member-free` boosts count?** Recommend: count contributors/presence,
-   not value.
-3. **Do streams count?** Recommend no for fundraisers (they are ambient
-   listen-through), and make it policy so TWiB can choose otherwise.
-4. **Identity scope now** — the layered pipeline (§3) with deterministic
-   auto-merges + a review queue. Recommend building passes 0–2 (deterministic)
-   and the *exposure* endpoints first; the review queue can be worked later.
-   It is measured — `sender_id` already exists in 353k rows, so the strong
-   evidence is available without any new intake.
-5. **Target currency** — recommend USD-cents canonical with sats derived (§4.1).
-6. **Publish host** — R2 static page vs Cloudflare Pages vs showfactory.
-7. **Schema endpoint** — committed (`GET /api/v1/schema`), see roadmap item 2.
+**Per-campaign inputs still to fill** (config, not policy): the target amount
+(the actual flight/hotel cost), campaign window dates, CTA URL, and the public
+title/description.
 
 ---
 

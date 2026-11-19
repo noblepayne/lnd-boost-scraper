@@ -7,6 +7,44 @@ Format: date · decision · why.
 
 ---
 
+## 2026-11-19 · Campaigns plan locked (five decisions) + schema endpoint shipped
+
+### Schema endpoint — shipped
+
+`GET /api/v1/schema`. The default response is ~0.15s and lists every attribute
+with its declared flag and type; `?examples=true` (pair with `?q=`) adds sample
+values, `?counts=true` adds entity counts.
+
+Two implementation lessons worth keeping:
+- **Datalevin auto-registers attributes it has seen**, so `d/schema` is already
+  a complete in-memory index of the data model. Discovery needs no sampling —
+  an earlier sampling version cost 44s per call; this costs nothing.
+- "Declared" must mean *in the application schema*, not "present in
+  `d/schema`", or every attribute looks declared and the interesting ones stay
+  invisible.
+
+What it immediately revealed: **58 real, queryable, undocumented attributes** —
+`:boostagram/boost_link` (313,724 rows), `:boostagram/name` (377,276),
+`:boostagram/app_version` (58,678), `:feedID`, `:guid`, `:itemID`,
+`:reply_address`, and more. Exactly the kind of thing that was invisible before.
+
+### Campaigns plan — locked with Wes
+
+1. **Attribution: `#700club` OR episode 700.** The hashtag makes pre-episode
+   fundraising possible (eps 694–699); the finale counts by episode. No widget
+   change needed.
+2. **What counts: sats + fiat boosts.** Member-free adds contributors, not
+   value. **Streams excluded**, as policy so other shows can differ.
+3. **Target in USD cents, canonical.** Sats derived at snapshot rate, labelled
+   — a BTC move must not silently move the goal (the cost is a flight).
+4. **Publish a static JSON artifact to R2**, page reads it. The scraper is
+   never exposed; one JSON per campaign, reusable for Planet Nix/SCaLE.
+5. **Identity: deterministic passes + exposure endpoints** ship with campaigns;
+   the review queue is worked continuously afterwards.
+
+Still needed from Wes (config, not policy): target amount, window dates, CTA
+URL, public title/description.
+
 ## 2026-11-19 · Architecture decisions: lens, artifacts, schema endpoint, lens refactor
 
 Recorded so they are not re-litigated, and so the follow-ups survive context
