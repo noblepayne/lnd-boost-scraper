@@ -55,7 +55,7 @@ def render(d, show):
     A("## The Board")
     A("")
     if fr:
-        A(f"**Current front runner: {fr['sender']} — {n(fr['sats'])} sats "
+        A(f"**Current front runner: {fr['handle']} — {n(fr['sats'])} sats "
           f"from {fr['count']} boosts.**")
         A("")
     A("## 💰 Most Sats")
@@ -63,14 +63,14 @@ def render(d, show):
     A("| # | Booster | Sats | Boosts |")
     A("|---|---------|------|--------|")
     for i, x in enumerate(d["by-sats"], 1):
-        A(f"| {i} | {x['sender']} | {n(x['sats'])} | {x['count']} |")
+        A(f"| {i} | {x['handle']} | {n(x['sats'])} | {x['count']} |")
     A("")
     A("## 🔁 Most Boosts")
     A("")
     A("| # | Booster | Boosts | Sats |")
     A("|---|---------|--------|------|")
     for i, x in enumerate(d["by-count"], 1):
-        A(f"| {i} | {x['sender']} | {x['count']} | {n(x['sats'])} |")
+        A(f"| {i} | {x['handle']} | {x['count']} | {n(x['sats'])} |")
     if d["streams"]["by-sats"]:
         A("")
         A("## 📡 Stream Leaders")
