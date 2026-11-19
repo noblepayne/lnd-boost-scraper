@@ -4,7 +4,7 @@
 Usage:
     python3 scripts/boosties_report.py --show lup --limit 10 \
         --out reports/boosties-$(date +%F).md
-    python3 scripts/boosties_report.py --show lup --since 1735689600
+    python3 scripts/boosties_report.py --show lup --since 1767254400
 
 Requires only the stdlib. Talks to GET /api/v1/boosties.
 """
@@ -112,7 +112,7 @@ def main():
     p.add_argument("--api", default="http://100.120.212.39:3223")
     p.add_argument("--show", default="lup")
     p.add_argument("--since", type=int, default=None,
-                   help="epoch seconds; default = API default (2025-01-01)")
+                   help="epoch seconds; default = API default (2026-01-01 LA)")
     p.add_argument("--limit", type=int, default=10)
     p.add_argument("--out", default=None)
     args = p.parse_args()

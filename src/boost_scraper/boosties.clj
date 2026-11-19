@@ -8,7 +8,7 @@
 
    Conventions, matching the pre-existing segment numbers:
    - self-boosts (chrislas / noblepayne) are excluded by default;
-   - the window starts at `since` epoch seconds, default 2025-01-01;
+   - the window starts at `since` epoch seconds, default 2026-01-01 (LA);
    - boosts and streams are reported separately (they are different acts) and
      also summed into a combined v4v total;
    - amounts come from `:boostagram/value_sat_total` (integer sats)."
@@ -16,8 +16,10 @@
             [datalevin.core :as d]))
 
 (def default-since
-  "2025-01-01T00:00:00Z — the window the original Boosties numbers used."
-  1735689600)
+  "2026-01-01T00:00 America/Los_Angeles (= 2026-01-01T08:00Z). The Boosties
+   window is the current year in the show's timezone: everything from Jan 1
+   inclusive, i.e. nothing from 2025-12-31T23:59:59-08:00 or earlier."
+  1767254400)
 
 (def self-boosters
   "Hosts who boost their own show; excluded from public leaderboards."

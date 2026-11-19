@@ -19,7 +19,7 @@ Booster leaderboards for the periodic Boosties segment.
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `show` | string | `lup` | Show slug or regex |
-| `since` | int | `1735689600` | Epoch seconds (2025-01-01Z — the window the segment used) |
+| `since` | int | `1767254400` | Epoch seconds — default is **2026-01-01 00:00 America/Los_Angeles** (= 08:00Z). Inclusive: nothing from 2025 or earlier counts. |
 | `limit` | int | `10` | Rows per board (totals always cover everyone) |
 | `include-self` | bool | `false` | Include chrislas / noblepayne (excluded by default) |
 
@@ -32,7 +32,7 @@ Response:
 ```json
 {
   "show-regex": "(?i).*unplugged.*",
-  "since": 1735689600,
+  "since": 1767254400,
   "limit": 8,
   "front-runner": {"sender": "blackhost", "sats": 3526758, "count": 11},
   "by-sats":   [{"sender": "...", "sats": 0, "count": 0}],

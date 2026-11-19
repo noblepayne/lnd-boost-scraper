@@ -29,7 +29,9 @@
 
 (defn- make-boost
   [{:keys [sender podcast action sats epoch identifier]
-    :or   {podcast "LINUX Unplugged" action "boost" epoch 1767225600
+    :or   {podcast "LINUX Unplugged" action "boost"
+           ;; 2026-06-01T00:00Z — comfortably inside the default 2026 window
+           epoch 1780272000
            identifier (str "t-" (java.util.UUID/randomUUID))}}]
   {:invoice/identifier identifier
    :invoice/creation_date epoch
@@ -76,12 +78,16 @@
 
 (deftest test-leaderboard-since-window
   (insert! [{:sender "old" :sats 100 :epoch 1600000000}
-            {:sender "new" :sats 200 :epoch 1767225600}])
-  (testing "window filters on creation epoch"
+            {:sender "last-year" :sats 150 :epoch 1767225600}   ; 2026-01-01 00:00Z = 2025-12-31 16:00 LA
+            {:sender "new" :sats 200 :epoch 1780272000}])       ; 2026-06-01Z
+  (testing "the default window is 2026 in LA: New Year's Eve Pacific is excluded"
     (is (= ["new"]
-           (mapv :sender (boosties/leaderboard *conn*
-                                               {:regex "(?i).*unplugged.*"
-                                                :since-epoch 1735689600}))))))
+           (mapv :sender (boosties/leaderboard *conn* {:regex "(?i).*unplugged.*"})))))
+  (testing "an explicit since overrides the default"
+    (is (= #{"last-year" "new"}
+           (into #{} (map :sender)
+                 (boosties/leaderboard *conn* {:regex "(?i).*unplugged.*"
+                                               :since-epoch 1767225600}))))))
 
 (deftest test-leaderboard-action-separation
   (insert! [{:sender "alice" :sats 1000 :action "boost"}
@@ -130,6 +136,6 @@
 (deftest test-payload-defaults
   (insert! [{:sender "alice" :sats 100}])
   (let [p (boosties/payload *conn* {:regex "(?i).*unplugged.*"})]
-    (testing "defaults: since 2025-01-01, limit 10"
+    (testing "defaults: since 2026-01-01 (LA), limit 10"
       (is (= boosties/default-since (:since p)))
       (is (= 10 (:limit p))))))
