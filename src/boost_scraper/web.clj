@@ -6,6 +6,7 @@
             [boost-scraper.shows :as shows]
             [boost-scraper.client-state :as client-state]
             [boost-scraper.analysis :as analysis]
+            [boost-scraper.boosties :as boosties]
             [boost-scraper.feed :as feed]
             [boost-scraper.query-proxy :as qp]
             [boost-scraper.reconcile :as rec]
@@ -228,6 +229,33 @@
     {:post {:handler (handle-reconcile-backfill db-conn)}}]
    ["/api/v1/reconcile/resolve"
     {:post {:handler (handle-reconcile-resolve db-conn)}}]
+   ;; Boosties — booster leaderboards for the periodic segment.
+   ;; Fresh numbers are one curl away; no REPL needed.
+   ["/api/v1/boosties"
+    {:get {:handler (fn [request]
+                      (let [{{:strs [show since limit include-self]} :params} request
+                            show (or show "lup")
+                            show-regex (safe-regex-for show)
+                            since (when since (try (Long/parseLong since) (catch NumberFormatException _ nil)))
+                            limit (when limit (try (Long/parseLong limit) (catch NumberFormatException _ nil)))
+                            include-self? (= include-self "true")]
+                        (if-not show-regex
+                          {:status 400
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string {:error (str "Invalid show: " show)})}
+                          (try
+                            (let [result (boosties/payload db-conn
+                                                           (cond-> {:regex show-regex
+                                                                    :include-self? include-self?}
+                                                             since (assoc :since-epoch since)
+                                                             limit (assoc :limit limit)))]
+                              {:status 200
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string result)})
+                            (catch Exception e
+                              {:status 500
+                               :headers {"content-type" "application/json"}
+                               :body (json/generate-string {:error (.getMessage e)})})))))}}]
    ;; Analysis endpoints
    ["/api/v1/analysis/top-boosters"
     {:get {:handler (fn [request]
