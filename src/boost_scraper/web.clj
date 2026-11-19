@@ -7,6 +7,7 @@
             [boost-scraper.client-state :as client-state]
             [boost-scraper.analysis :as analysis]
             [boost-scraper.boosties :as boosties]
+            [boost-scraper.schema :as db-schema]
             [boost-scraper.feed :as feed]
             [boost-scraper.query-proxy :as qp]
             [boost-scraper.reconcile :as rec]
@@ -229,6 +230,19 @@
     {:post {:handler (handle-reconcile-backfill db-conn)}}]
    ["/api/v1/reconcile/resolve"
     {:post {:handler (handle-reconcile-resolve db-conn)}}]
+   ;; Database self-description — lets a caller (human or bot) write correct
+   ;; Datalog without reading source. Includes undeclared attributes.
+   ["/api/v1/schema"
+    {:get {:handler (fn [request]
+                      (let [{{:strs [q]} :params} request]
+                        (try
+                          {:status 200
+                           :headers {"content-type" "application/json"}
+                           :body (json/generate-string (db-schema/cached db-conn {:q q}))}
+                          (catch Exception e
+                            {:status 500
+                             :headers {"content-type" "application/json"}
+                             :body (json/generate-string {:error (.getMessage e)})}))))}}]
    ;; Boosties — booster leaderboards for the periodic segment.
    ;; Fresh numbers are one curl away; no REPL needed.
    ["/api/v1/boosties"
