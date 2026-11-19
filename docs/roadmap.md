@@ -23,17 +23,22 @@ fixed windows with golden tests (the same method used for Boosties).
 
 **Agreed:** 2026-11-19.
 
-### 2. `GET /api/v1/schema` — attribute introspection ⏳ NOT STARTED
-**Why:** a "smart bot" querying the API currently has to read `.clj` files to
+### 2. `GET /api/v1/schema` — attribute introspection ✅ DONE 2026-11-19
+**Why it mattered:** a "smart bot" querying the API had to read `.clj` files to
 learn attribute names, types, and shapes. A schema endpoint makes Datalog
-queries writable from documentation alone, which is the stated goal of the query
-API (`docs/query-api-briefing.md`).
+queries writable from documentation alone.
 
-**Shape:** attributes with declared type, uniqueness, rough cardinality, and a
-few example values; plus undeclared-but-present attributes (we rely on these —
-e.g. `:boostagram/sender_id` existed unnoticed on 353k rows).
+**Shipped:** `GET /api/v1/schema` — names, declared flag, types, plus opt-in
+`?examples=true` / `?counts=true` and `?q=` filtering. It immediately surfaced
+**58 real, queryable, undocumented attributes** (`:boostagram/boost_link` on
+313k rows, `:boostagram/name` on 377k, `:boostagram/app_version`, `:feedID`,
+`:guid`, …) — proof that the "undeclared attributes are invisible" gap was
+costing us.
 
-**Agreed:** 2026-11-19.
+Implementation note for the future: Datalevin auto-registers every attribute it
+has seen, so `d/schema` is a complete, in-memory index of the data model.
+Discovery needs no datom sampling (an earlier sampling version cost 44s/call;
+this costs ~0.15s).
 
 ### 3. Campaigns & goals — P1 ⏳ NOT STARTED
 See `docs/campaign-goal-spec.md`. Model + composable matcher + internal

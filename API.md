@@ -10,6 +10,49 @@ You can pass a slug name or a raw regex pattern for any `show` parameter.
 
 ---
 
+## Schema (self-describing database)
+
+`GET /api/v1/schema`
+
+Write correct Datalog without reading source. Returns every attribute the
+database knows about, including ones absent from the application schema.
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `q` | — | substring filter on attribute name |
+| `examples` | `false` | include sample values (also yields types for undeclared attrs) |
+| `counts` | `false` | include entity counts (~1s per attribute — slow) |
+
+```bash
+curl 'http://localhost:3223/api/v1/schema'
+curl 'http://localhost:3223/api/v1/schema?q=sender'
+curl 'http://localhost:3223/api/v1/schema?q=sender_id&examples=true'
+```
+
+Response:
+
+```json
+{
+  "attributes": [
+    {"attribute": ":boostagram/podcast", "declared": true, "type": "db.type/string"},
+    {"attribute": ":boostagram/sender_id", "declared": false, "type": "db.type/string",
+     "examples": ["ANON", "ericpp@getalby.com"]}
+  ],
+  "counts": {"declared": 40, "undeclared": 58, "total": 98},
+  "notes": {"declared": "...", "undeclared": "...", "examples": "...", "entity-counts": "..."}
+}
+```
+
+`declared` means *in the application schema* (`boost-scraper.db/schema`), not
+merely known to Datalevin — Datalevin auto-registers every attribute it has
+seen, so 58 attributes here are real and queryable but undocumented until now
+(`:boostagram/boost_link` on 313k rows, `:boostagram/name` on 377k,
+`:boostagram/app_version`, `:boostagram/feedID`, `:boostagram/guid`, …).
+
+**Performance:** default is ~0.15s (schema is in memory). `examples` costs
+~5s for a whole scan, so pair it with `q` to inspect one attribute; `counts`
+is ~1s per attribute. Results are cached for an hour.
+
 ## Boosties
 
 Booster leaderboards for the periodic Boosties segment.
