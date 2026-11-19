@@ -1,19 +1,20 @@
 (ns boost-scraper.boosties
-  "Boosties — leaderboard queries for the periodic booster segment.
+  "Boosties — leaderboard lens over the accounting core.
 
-   Historically a REPL-only scratch namespace (see the comment block at the
-   bottom retained as history). Now a small parameterized library behind
-   `GET /api/v1/boosties`, so fresh numbers are one curl away instead of a
-   local Clojure session.
+   Built on `contributions` (see docs/campaign-goal-spec.md §2) rather than its
+   own queries, so the segment can never disagree with the report:
+   sats, fiat and member boosts are kept as distinct money streams and the
+   endpoint says which is which.
 
-   Conventions, matching the pre-existing segment numbers:
-   - self-boosts (chrislas / noblepayne) are excluded by default;
-   - the window starts at `since` epoch seconds, default 2026-01-01 (LA);
-   - boosts and streams are reported separately (they are different acts) and
-     also summed into a combined v4v total;
-   - amounts come from `:boostagram/value_sat_total` (integer sats)."
-  (:require [clojure.string :as str]
-            [datalevin.core :as d]))
+   Boards:
+   - sats    : on-chain/Lightning sat boosts (integer sats)
+   - fiat    : dollar-denominated web boosts (integer cents, shown as USD)
+   - members : member-free boosts (presence, no per-boost value)
+   - streams : ambient listen-through (sats)
+   - combined: all sats-bearing events (boosts + streams), for the segment's
+               'total v4v' line — never mixes fiat into sats."
+  (:require [boost-scraper.contributions :as c]
+            [clojure.string :as str]))
 
 (def default-since
   "2026-01-01T00:00 America/Los_Angeles (= 2026-01-01T08:00Z). The Boosties
@@ -21,121 +22,106 @@
    inclusive, i.e. nothing from 2025-12-31T23:59:59-08:00 or earlier."
   1767254400)
 
-(def self-boosters
-  "Hosts who boost their own show; excluded from public leaderboards."
-  #{"chrislas" "noblepayne"})
+(def ^:private week-seconds (* 7 86400))
 
-;; ---------------------------------------------------------------------------
-;; Queries
-;; ---------------------------------------------------------------------------
+(defn- week-bucket [epoch] (quot (long epoch) week-seconds))
 
-(def ^:private leaderboard-query
-  "Per-sender event count and sat total for one action within the window.
+(defn- window [since-epoch]
+  {:from (long (or since-epoch default-since))
+   :to (quot (System/currentTimeMillis) 1000)})
 
-   Plain patterns only — no get-else — so this rides indexes instead of paying
-   the per-row function cost we measured at ~40x on full scans."
-  '[:find ?sender (count ?e) (sum ?sats)
-    :in $ ?action ?regex ?since
-    :where
-    [?e :boostagram/action ?action]
-    [?e :invoice/creation_date ?cd]
-    [(>= ?cd ?since)]
-    [?e :boostagram/podcast ?podcast]
-    [(re-matches ?regex ?podcast) _]
-    [?e :boostagram/sender_name_normalized ?sender]
-    [?e :boostagram/value_sat_total ?sats]])
+(defn- with-usd [row]
+  (assoc row :usd (/ (double (:fiat-cents row)) 100.0)))
 
-(defn- normalize-regex
-  "Accept a compiled Pattern or a string pattern."
-  [regex]
-  (cond (instance? java.util.regex.Pattern regex) regex
-        (string? regex) (re-pattern regex)
-        :else (re-pattern "(?i).*")))
-
-(defn leaderboard
-  "Rows of {:sender :count :sats} for `action` (\"boost\" or \"stream\"),
-   since `since-epoch`, for shows whose podcast name matches `regex`.
-   Self-boosts are dropped unless `include-self?`."
-  [conn {:keys [regex action since-epoch include-self?]
-         :or   {action "boost" include-self? false}}]
-  (let [rows (d/q leaderboard-query
-                  (d/db conn)
-                  action
-                  (normalize-regex regex)
-                  (long (or since-epoch default-since)))]
-    (->> rows
-         (map (fn [[sender cnt sats]]
-                {:sender sender :count (long cnt) :sats (long sats)}))
-         (remove (fn [{:keys [sender]}]
-                   (and (not include-self?)
-                        (contains? self-boosters (some-> sender str/lower-case)))))
-         (filter (fn [{:keys [sender]}] (not= sender "N/A"))))))
+(defn- aggregate
+  "Group contributions into per-handle rows:
+   {:handle :count :sats :fiat-cents :weeks}"
+  [cs]
+  (->> cs
+       (group-by :contribution/handle)
+       (map (fn [[handle xs]]
+              {:handle handle
+               :count (count xs)
+               :sats (reduce + 0 (map :contribution/sats xs))
+               :fiat-cents (reduce + 0 (remove nil? (map :contribution/fiat-cents xs)))
+               :weeks (count (into #{} (map (comp week-bucket :contribution/occurred-at) xs)))}))
+       vec))
 
 (defn- rank
-  "Top `limit` rows by `key`, descending."
   [rows k limit]
-  (take limit (sort-by k #(compare %2 %1) rows)))
+  (take limit (sort-by (juxt k :handle) #(compare %2 %1) rows)))
 
-(defn- totals
-  [rows]
-  {:events (reduce + 0 (map :count rows))
-   :sats (reduce + 0 (map :sats rows))
-   :people (count rows)})
+(defn- summary
+  "Public-facing totals shape (events/sats/fiat-cents/people)."
+  [cs]
+  (let [t (c/totals cs)]
+    {:events (:count t)
+     :sats (:sats t)
+     :fiat-cents (:fiat-cents t)
+     :people (:people t)}))
+
+(defn leaderboard
+  "Convenience lens: sat boosts aggregated per handle, highest sats first.
+   Kept for callers/tests that want the original shape."
+  [conn {:keys [regex since-epoch include-self?]}]
+  (let [{:keys [from to]} (window since-epoch)]
+    (->> (c/contributions conn {:from from :to to
+                                :show-regex regex
+                                :actions #{:boost}
+                                :exclude-self? (not include-self?)})
+         (filter #(= :sat (:contribution/type %)))
+         aggregate
+         (sort-by (juxt (comp - :sats) :handle))
+         (map (fn [r] {:sender (:handle r) :count (:count r) :sats (:sats r)})))))
 
 (defn payload
-  "The full Boosties payload used by the segment and the HTTP endpoint.
+  "The full Boosties payload.
 
    opts :: {:regex :since-epoch :limit :include-self?}
 
-   Returns
-   {:show-regex :since :limit
-    :front-runner {:sender :sats :count}
-    :by-sats [...] :by-count [...]
-    :streams {:by-sats [...] :by-count [...]}
-    :totals {:boosts {...} :streams {...} :combined {...}}}"
-  [conn {:keys [limit since-epoch] :or {limit 10} :as opts}]
+   Sats and fiat are reported separately and never summed together; USD is
+   cents/100 exactly (no price-feed conversion here, so the segment cannot
+   drift with the BTC rate)."
+  [conn {:keys [limit since-epoch include-self?] :or {limit 10} :as opts}]
   (let [limit (long limit)
-        boosts (leaderboard conn (assoc opts :action "boost"))
-        streams (leaderboard conn (assoc opts :action "stream"))
-        by-sats (rank boosts :sats limit)
-        by-count (rank boosts :count limit)
-        stream-by-sats (rank streams :sats limit)
-        stream-by-count (rank streams :count limit)
-        boost-totals (totals boosts)
-        stream-totals (totals streams)
-        ;; Combined people: a person who both boosts and streams is one person.
-        combined (->> (concat boosts streams)
-                      (group-by :sender)
-                      (reduce-kv (fn [acc sender xs]
-                                   (assoc acc sender
-                                          {:sats (reduce + 0 (map :sats xs))
-                                           :count (reduce + 0 (map :count xs))}))
-                                 {})
-                      (map (fn [[sender v]] (assoc v :sender sender))))]
-    {:show-regex (str (normalize-regex (:regex opts)))
-     :since (long (or since-epoch default-since))
+        {:keys [from to]} (window since-epoch)
+        cs (c/contributions conn {:from from :to to
+                                  :show-regex (:regex opts)
+                                  :actions #{:boost :stream}
+                                  :exclude-self? (not include-self?)})
+        by-action (group-by :contribution/action cs)
+        boosts (get by-action :boost [])
+        streams (get by-action :stream [])
+        sat-boosts (filter #(= :sat (:contribution/type %)) boosts)
+        fiat-boosts (filter #(= :fiat (:contribution/type %)) boosts)
+        member-boosts (filter #(= :member-free (:contribution/type %)) boosts)
+        sat-streams (filter #(= :sat (:contribution/type %)) streams)
+        sat-rows (aggregate sat-boosts)
+        fiat-rows (map with-usd (aggregate fiat-boosts))
+        member-rows (aggregate member-boosts)
+        stream-rows (aggregate sat-streams)
+        t-summary summary
+        sat-t (t-summary sat-boosts)
+        fiat-t (t-summary fiat-boosts)
+        member-t (t-summary member-boosts)
+        stream-t (t-summary sat-streams)]
+    {:show-regex (str (:regex opts ".*"))
+     :since from
      :limit limit
-     :front-runner (first by-sats)
-     :by-sats (vec by-sats)
-     :by-count (vec by-count)
-     :streams {:by-sats (vec stream-by-sats)
-               :by-count (vec stream-by-count)}
-     :totals {:boosts boost-totals
-              :streams stream-totals
-              :combined {:sats (+ (:sats boost-totals) (:sats stream-totals))
-                         :events (+ (:events boost-totals) (:events stream-totals))
-                         :people (count combined)}}}))
-
-(comment
-  ;; Historical REPL scratch (kept for the original segment definitions).
-  ;; Superseded by `payload` + GET /api/v1/boosties.
-  ;;
-  ;;   (def conn core/nodecan-conn)
-  ;;   (payload conn {:regex "(?i).*unplugged.*" :since-epoch 1735689600 :limit 10})
-  ;;
-  ;; Original ad-hoc queries lived here (boosties-v1/v2, by-total-amount,
-  ;; by-number, total-v4v, boosties-clients). Their semantics are folded into
-  ;; `leaderboard` + `payload`; the numbers they produced are reproduced by:
-  ;;   boosts  -> leaderboard conn {:action "boost"}
-  ;;   streams -> leaderboard conn {:action "stream"})
-  )
+     :front-runner (first (rank sat-rows :sats limit))
+     :by-sats (vec (rank sat-rows :sats limit))
+     :by-count (vec (rank sat-rows :count limit))
+     :fiat {:by-amount (vec (rank fiat-rows :fiat-cents limit))
+            :by-count (vec (rank fiat-rows :count limit))}
+     :members {:by-count (vec (rank member-rows :count limit))
+               :by-weeks (vec (rank member-rows :weeks limit))}
+     :streams {:by-sats (vec (rank stream-rows :sats limit))
+               :by-count (vec (rank stream-rows :count limit))}
+     :totals {:boosts sat-t
+              :fiat fiat-t
+              :members member-t
+              :streams stream-t
+              ;; "total v4v" = every sats-bearing event; fiat stays separate
+              :combined {:sats (+ (:sats sat-t) (:sats stream-t))
+                         :events (+ (:events sat-t) (:events stream-t))
+                         :people (:people (t-summary (concat sat-boosts sat-streams)))}}}))

@@ -34,21 +34,34 @@ Response:
   "show-regex": "(?i).*unplugged.*",
   "since": 1767254400,
   "limit": 8,
-  "front-runner": {"sender": "blackhost", "sats": 3526758, "count": 11},
-  "by-sats":   [{"sender": "...", "sats": 0, "count": 0}],
-  "by-count":  [{"sender": "...", "sats": 0, "count": 0}],
+  "front-runner": {"handle": "blackhost", "sats": 2469134, "count": 4, "fiat-cents": 0, "weeks": 3},
+  "by-sats":   [{"handle": "...", "sats": 0, "count": 0, "fiat-cents": 0, "weeks": 0}],
+  "by-count":  [{"handle": "...", "sats": 0, "count": 0, "fiat-cents": 0, "weeks": 0}],
+  "fiat":      {"by-amount": [{"handle": "...", "fiat-cents": 0, "usd": 0.0, "count": 0}],
+                "by-count":  []},
+  "members":   {"by-count": [{"handle": "...", "count": 0, "weeks": 0}],
+                "by-weeks": []},
   "streams":   {"by-sats": [], "by-count": []},
   "totals": {
-    "boosts":   {"events": 0, "sats": 0, "people": 0},
-    "streams":  {"events": 0, "sats": 0, "people": 0},
-    "combined": {"events": 0, "sats": 0, "people": 0}
+    "boosts":   {"events": 0, "sats": 0, "fiat-cents": 0, "people": 0},
+    "fiat":     {"events": 0, "sats": 0, "fiat-cents": 0, "people": 0},
+    "members":  {"events": 0, "sats": 0, "fiat-cents": 0, "people": 0},
+    "streams":  {"events": 0, "sats": 0, "fiat-cents": 0, "people": 0},
+    "combined": {"sats": 0, "events": 0, "people": 0}
   }
 }
 ```
 
-Boosts and streams are separate boards (different acts) and also summed into a
-combined total; a person who both boosts and streams is counted once in
-`combined.people`. Amounts are integer sats from `:boostagram/value_sat_total`.
+**Money streams are never merged.** Sats boards count `:sat` boosts (integer
+sats); the `fiat` boards count dollar-denominated web boosts (integer cents,
+with `usd` = cents/100 computed exactly — no BTC-rate conversion here, so the
+segment cannot drift with the price). `members` counts member-free boosts
+(presence, no per-boost value) and `by-weeks` ranks consistency (distinct
+weeks with at least one member boost) — a good "most loyal member" angle.
+`combined.sats` is boosts + streams only; fiat stays separate by design.
+
+Boosts and streams are separate acts; a person who does both appears in each
+board and is counted once in `combined.people`.
 
 ## Analysis Endpoints
 

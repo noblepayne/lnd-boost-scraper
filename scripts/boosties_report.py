@@ -78,13 +78,43 @@ def render(d, show):
         A("| # | Streamer | Sats | Streams |")
         A("|---|----------|------|---------|")
         for i, x in enumerate(d["streams"]["by-sats"], 1):
-            A(f"| {i} | {x['sender']} | {n(x['sats'])} | {n(x['count'])} |")
+            A(f"| {i} | {x['handle']} | {n(x['sats'])} | {n(x['count'])} |")
+    fiat = d.get("fiat") or {}
+    if fiat.get("by-amount"):
+        A("")
+        A("## 💵 Fiat Boosts")
+        A("")
+        A("| # | Booster | USD | Boosts |")
+        A("|---|---------|-----|--------|")
+        for i, x in enumerate(fiat["by-amount"], 1):
+            A(f"| {i} | {x['handle']} | ${x['usd']:,.2f} | {x['count']} |")
+    mem = d.get("members") or {}
+    if mem.get("by-count"):
+        A("")
+        A("## 🎟 Members — Most Member Boosts")
+        A("")
+        A("| # | Member | Member Boosts | Weeks |")
+        A("|---|--------|---------------|-------|")
+        for i, x in enumerate(mem["by-count"], 1):
+            A(f"| {i} | {x['handle']} | {x['count']} | {x.get('weeks', 0)} |")
+        if mem.get("by-weeks"):
+            A("")
+            A("**Most consistent member** (distinct weeks with a member boost):")
+            A("")
+            for x in mem["by-weeks"][:3]:
+                A(f"- {x['handle']} — {x.get('weeks', 0)} weeks ({x['count']} boosts)")
     A("")
     A("## Totals")
     A("")
     A(f"+ Total Boosted Sats: {n(t['boosts']['sats'])}")
     A(f"+ Total Boosts: {n(t['boosts']['events'])}")
     A(f"+ Total Boosters: {n(t['boosts']['people'])}")
+    if t.get("fiat") and t["fiat"].get("fiat-cents"):
+        A(f"+ Total Fiat Boosts: ${t['fiat']['fiat-cents']/100:,.2f} "
+          f"({n(t['fiat']['events'])} boosts, {n(t['fiat']['people'])} people)")
+    if t.get("members") and t["members"].get("events"):
+        A(f"+ Total Member Boosts: {n(t['members']['events'])} "
+          f"({n(t['members']['people'])} members)")
     A(f"+ Total Streamed Sats: {n(t['streams']['sats'])}")
     A(f"+ Total Streams: {n(t['streams']['events'])}")
     A(f"+ Total Streamers: {n(t['streams']['people'])}")
