@@ -234,11 +234,11 @@
    ;; Datalog without reading source. Includes undeclared attributes.
    ["/api/v1/schema"
     {:get {:handler (fn [request]
-                      (let [{{:strs [q counts]} :params} request]
+                      (let [{{:strs [q examples counts]} :params} request]
                         (try
                           {:status 200
                            :headers {"content-type" "application/json"}
-                           :body (json/generate-string (db-schema/cached db-conn {:q q :counts? (= counts "true")}))}
+                           :body (json/generate-string (db-schema/cached db-conn {:q q :examples? (= examples "true") :counts? (= counts "true")}))}
                           (catch Exception e
                             {:status 500
                              :headers {"content-type" "application/json"}

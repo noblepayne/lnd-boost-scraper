@@ -37,7 +37,7 @@
 
 (deftest test-describe-covers-declared-attributes
   (seed!)
-  (let [result (schema/describe *conn*)
+  (let [result (schema/describe *conn* {:examples? true})
         by-name (into {} (map (juxt :attribute identity) (:attributes result)))
         podcast (get by-name ":boostagram/podcast")]
     (testing "declared attributes are reported with their schema type"
@@ -49,13 +49,13 @@
     (testing "entity counts are opt-in (they cost ~1s/attribute live)"
       (is (not (contains? podcast :entities)))
       (let [with-counts (into {} (map (juxt :attribute identity)
-                                      (:attributes (schema/describe *conn* {:counts? true}))))
+                                      (:attributes (schema/describe *conn* {:examples? true :counts? true}))))
             p2 (get with-counts ":boostagram/podcast")]
         (is (pos? (:entities p2)))))))
 
 (deftest test-describe-discovers-undeclared-attributes
   (seed!)
-  (let [result (schema/describe *conn*)
+  (let [result (schema/describe *conn* {:examples? true})
         by-name (into {} (map (juxt :attribute identity) (:attributes result)))
         sender-id (get by-name ":boostagram/sender_id")]
     (testing "an attribute present in data but absent from the schema is surfaced"
@@ -72,13 +72,13 @@
 
 (deftest test-filter-by-substring
   (seed!)
-  (let [result (schema/filtered *conn* {:q "podcast"})
+  (let [result (schema/describe *conn* {:q "podcast"})
         names (mapv :attribute (:attributes result))]
     (testing "only matching attributes survive the filter"
       (is (seq names))
       (is (every? #(re-find #"podcast" %) names)))
     (testing "unfiltered returns everything"
-      (is (> (count (:attributes (schema/filtered *conn* {}))) (count names))))))
+      (is (> (count (:attributes (schema/describe *conn* {}))) (count names))))))
 
 (deftest test-cache-is-returned
   (seed!)
