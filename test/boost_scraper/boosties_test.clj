@@ -145,13 +145,34 @@
       (is (= 2 (get-in p [:totals :combined :events]))))))
 
 (deftest test-payload-limit-applies-to-boards-not-totals
-  (insert! (for [i (range 10)] {:sender (str "user" i) :sats (inc i)}))
+  (insert! (for [i (range 10)] {:sender (str "booster" i) :sats (inc i)}))
   (let [p (boosties/payload *conn* {:regex "(?i).*unplugged.*" :limit 3})]
     (testing "boards truncated"
       (is (= 3 (count (:by-sats p)))))
     (testing "totals cover everyone"
       (is (= 10 (get-in p [:totals :boosts :people])))
       (is (= 55 (get-in p [:totals :boosts :sats]))))))
+
+(deftest test-anonymous-is-counted-but-never-ranked
+  (insert! [{:sender "alice" :sats 1000}
+            {:sender "anonymous" :sats 5000}
+            {:sender "anonymous" :sats 500 :epoch 1780272001}
+            {:sender "user183420225038226" :sats 300}
+            {:sender "anonymous" :type :fiat :cents 1000 :epoch 1780272002}])
+  (let [p (boosties/payload *conn* {:regex "(?i).*unplugged.*" :limit 5})]
+    (testing "the anonymity bucket never occupies a leaderboard slot"
+      (is (= ["alice"] (mapv :handle (:by-sats p))))
+      (is (= ["alice"] (mapv :handle (:by-count p))))
+      (is (not-any? #(= "anonymous" (:handle %)) (get-in p [:fiat :by-amount]))))
+    (testing "but its money is still counted in totals"
+      (is (= 6800 (get-in p [:totals :boosts :sats])) "1000 named + 5500 anon + 300 auto")
+      (is (= 1000 (get-in p [:totals :fiat :fiat-cents]))))
+    (testing "and reported as its own line"
+      (is (= 5500 (get-in p [:anonymous :sats])))
+      (is (= 3 (get-in p [:anonymous :events])) "2 sat boosts + 1 fiat boost")
+      (is (= 1000 (get-in p [:anonymous :fiat-cents]))))
+    (testing "people counts named humans only — not the bucket"
+      (is (= 1 (get-in p [:totals :boosts :people]))))))
 
 (deftest test-payload-defaults
   (insert! [{:sender "alice" :sats 100}])

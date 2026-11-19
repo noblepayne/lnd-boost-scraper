@@ -46,17 +46,34 @@
 
 (defn- aggregate
   "Group contributions into per-handle rows:
-   {:handle :count :sats :fiat-cents :weeks}"
+   {:handle :handle-class :count :sats :fiat-cents :weeks}"
   [cs]
   (->> cs
        (group-by :contribution/handle)
        (map (fn [[handle xs]]
               {:handle handle
+               :handle-class (:contribution/handle-class (first xs))
                :count (count xs)
                :sats (reduce + 0 (map :contribution/sats xs))
                :fiat-cents (reduce + 0 (remove nil? (map :contribution/fiat-cents xs)))
                :weeks (count (into #{} (map (comp week-bucket :contribution/occurred-at) xs)))}))
        vec))
+
+(defn- ranked
+  "Rows rankable on a leaderboard: named handles only. The anonymity bucket is
+   excluded here and reported separately — its money still counts in totals."
+  [rows]
+  (filter #(= :named (:handle-class %)) rows))
+
+(defn- anonymous-total
+  "The anonymity bucket's contribution, reported as one line.
+   `:auto` handles (user####) are excluded from rankings too, but they are a
+   different phenomenon and stay out of this number."
+  [rows]
+  (let [anon (filter #(= :anonymous (:handle-class %)) rows)]
+    {:events (reduce + 0 (map :count anon))
+     :sats (reduce + 0 (map :sats anon))
+     :fiat-cents (reduce + 0 (map :fiat-cents anon))}))
 
 (defn- rank
   [rows k limit]
@@ -131,21 +148,24 @@
         stream-t {:events (reduce + 0 (map :count streams))
                   :sats (reduce + 0 (map :sats streams))
                   :fiat-cents 0
-                  :people (count streams)}
-        people (count (into (into #{} (map :handle sat-rows))
-                            (map :handle streams)))]
+                  :people (count (filter #(= :named (:handle-class %)) streams))}
+        people (count (into (into #{} (comp (filter #(= :named (:handle-class %))) (map :handle)) sat-rows)
+                            (comp (filter #(= :named (:handle-class %))) (map :handle))
+                            streams))]
     {:show-regex (str (:regex opts ".*"))
      :since from
      :limit limit
-     :front-runner (first (rank sat-rows :sats limit))
-     :by-sats (vec (rank sat-rows :sats limit))
-     :by-count (vec (rank sat-rows :count limit))
-     :fiat {:by-amount (vec (rank fiat-rows :fiat-cents limit))
-            :by-count (vec (rank fiat-rows :count limit))}
-     :members {:by-count (vec (rank member-rows :count limit))
-               :by-weeks (vec (rank member-rows :weeks limit))}
-     :streams {:by-sats (vec (rank streams :sats limit))
-               :by-count (vec (rank streams :count limit))}
+     :front-runner (first (rank (ranked sat-rows) :sats limit))
+     :by-sats (vec (rank (ranked sat-rows) :sats limit))
+     :by-count (vec (rank (ranked sat-rows) :count limit))
+     :fiat {:by-amount (vec (rank (ranked fiat-rows) :fiat-cents limit))
+            :by-count (vec (rank (ranked fiat-rows) :count limit))}
+     :members {:by-count (vec (rank (ranked member-rows) :count limit))
+               :by-weeks (vec (rank (ranked member-rows) :weeks limit))}
+     :streams {:by-sats (vec (rank (ranked streams) :sats limit))
+               :by-count (vec (rank (ranked streams) :count limit))}
+     ;; The anonymity bucket is not a person: never ranked, always counted.
+     :anonymous (anonymous-total (concat sat-rows fiat-rows member-rows streams))
      :totals {:boosts sat-t
               :fiat fiat-t
               :members member-t

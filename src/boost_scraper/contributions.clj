@@ -28,13 +28,26 @@
   "Hosts whose own boosts are excluded from public lenses."
   #{"chrislas" "noblepayne"})
 
-(defn- auto-generated-handle?
-  "Handles that are machine-issued and must never be merged or treated as a
-   named identity (`anonymous`, `user183420225038226`, `N/A`)."
+(defn handle-class
+  "Classify a handle so lenses can rank real people without losing real money.
+
+   :anonymous   — the shared anonymity bucket. Many different people use it, so
+                  it must never occupy a leaderboard slot, but its sats are real
+                  and must still count in totals.
+   :auto        — machine-issued per-install handles (`user183420225038226`,
+                  `N/A`). Also not a name, treated like anonymous for ranking.
+   :named       — everything else; the only class that can be ranked."
   [handle]
   (let [h (some-> handle str str/lower-case (str/replace #"@.*$" "") str/trim)]
-    (or (nil? h) (= "" h) (= "n/a" h) (= "anonymous" h)
-        (boolean (re-matches #"user\d+.*" h)))))
+    (cond
+      (or (nil? h) (= "" h) (= "anonymous" h)) :anonymous
+      (or (= "n/a" h) (boolean (re-matches #"user\d+.*" h))) :auto
+      :else :named)))
+
+(defn- auto-generated-handle?
+  "Backwards-compatible predicate: anything that is not a rankable name."
+  [handle]
+  (not= :named (handle-class handle)))
 
 ;; ---------------------------------------------------------------------------
 ;; Query — one pull, then normalize in Clojure. Entity volume is small for
@@ -104,7 +117,10 @@
                     :else (re-pattern ".*"))]
     (->> (d/q aggregate-query (d/db conn) (long from) (long to) regex (name action))
          (map (fn [[handle cnt sats]]
-                {:handle handle :count (long cnt) :sats (long (or sats 0))}))
+                {:handle handle
+                 :handle-class (handle-class handle)
+                 :count (long cnt)
+                 :sats (long (or sats 0))}))
          (remove (fn [{:keys [handle]}]
                    (and (not include-auto?) (auto-generated-handle? handle))))
          (remove (fn [{:keys [handle]}]
@@ -127,6 +143,7 @@
      :contribution/action (keyword action)
      :contribution/type (or (:boostagram/type m) :none)
      :contribution/handle (:boostagram/sender_name_normalized m)
+     :contribution/handle-class (handle-class (:boostagram/sender_name_normalized m))
      :contribution/sats sats
      :contribution/fiat-cents (when (pos? cents) cents)
      :contribution/occurred-at (when cd (long cd))
@@ -183,17 +200,26 @@
          vec)))
 
 (defn totals
-  "Roll up contributions. Sats and cents stay separate by design."
+  "Roll up contributions. Sats and cents stay separate by design.
+
+   `:people` counts distinct NAMED handles only — the anonymity bucket is many
+   people behind one string, so counting it as a person would be a lie. Its
+   money still lands in :sats / :fiat-cents."
   [cs]
   {:count (count cs)
-   :people (count (into #{} (map :contribution/handle) cs))
+   :people (count (into #{} (comp (filter #(= :named (:contribution/handle-class %)))
+                                  (map :contribution/handle))
+                        cs))
+   :anonymous (count (filter #(= :anonymous (:contribution/handle-class %)) cs))
    :sats (reduce + 0 (map :contribution/sats cs))
    :fiat-cents (reduce + 0 (remove nil? (map :contribution/fiat-cents cs)))})
 
 (defn by-handle
-  "Group into [{:handle :count :sats :fiat-cents}] — the shape lenses rank."
+  "Group into [{:handle :count :sats :fiat-cents}] — the shape lenses rank.
+   Anonymous/auto buckets are kept out of the ranking rows."
   [cs]
   (->> cs
+       (filter #(= :named (:contribution/handle-class %)))
        (group-by :contribution/handle)
        (map (fn [[handle xs]]
               (assoc (totals xs) :handle handle)))
