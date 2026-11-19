@@ -1,108 +1,101 @@
 # Manual Review — Operator Picks
 
-Three invoices remain in `manual-review` after the full reconcile sweep. The matcher
-refused to auto-pick because either multiple candidates exist with equally valid
-signals, or the content-identity guard detected divergent messages. These are
-**operator decisions**, not matcher gaps.
+**Current state (2026-11-19): one row open — Anon invoice `323627`.**
 
-To resolve: run the preview, pick the correct order for each, and transact the
-boost entity. Or leave them — they're informational, not orphans.
+The three original rows were resolved on 2026-09-02 after a forensic pass that
+disproved the original "pick a retry twin" premise. Full evidence and reasoning:
+`docs/dev-log.md` → *2026-09-02 · Manual-review picks resolved*.
 
----
-
-## 1. Memphis — Invoice 342724 (2,222 sats, LUP 670)
-
-**What happened:** Memphis boosted LUP 670 twice in quick succession (web-boost
-widget retry). Both orders went PENDING; one settled the invoice, the other
-stayed dead. The matcher found both orders as candidates but their messages
-diverge:
-
-| Order | Created | Message | Status |
-|-------|---------|---------|--------|
-| `od_vff0Bfkh8g` | Earlier | "Thanks for the value!" | PENDING |
-| `od_bY1at35Vl9` | Later | "Thanks for all the value! Web boost FTW" | PENDING |
-
-**Why the matcher refused:** content-identity guard — the two messages are
-different strings. The guard exists to prevent silent mis-assignment when the
-operator can make the right call.
-
-**Likely answer:** The invoice memo says "Payment for Web Boost: LUP 670 — Memphis".
-The settled invoice is 2,222 sats. Both orders are for 2,222 sats. The later-created
-order (`od_bY1at35Vl9`) is the probable anchor (attempt 1 canceled → attempt 2
-settled), based on the creation-order analysis from Phase 5. But this is a judgment
-call — check which message Memphis actually sent if you have the correspondence.
-
-**Action:** Pick the order that matches the message Memphis intended. Transact a boost
-entity with the chosen order's metadata. The other order stays dead (PENDING, never
-completes).
+> **What the forensics changed:** the Zaprite API *does* expose `paidAt` on
+> COMPLETE orders (it only hides it on PENDING). Aligning `paidAt` against LND
+> `settle_date` showed the candidate orders had **never paid the target
+> invoices**: PENDING candidates carried `invoice: None` and
+> `transactions: []` (checkout abandoned before payment), and COMPLETE
+> candidates had already settled *other* invoices. So "pick the retry that
+> settled" was not a valid model for these rows.
 
 ---
 
-## 2. Anon — Invoice 323627 (2,222 sats, TWIB ???)
+## Resolved — Memphis, invoice `342724` (2,222 sats, LUP 670) ✅ BOOKED
 
-**What happened:** An anonymous booster sent 2,222 sats. The matcher found 6 candidate
-orders — all 2,222 sats, all PENDING, all from the same time window. These are
-**double-creation retry twins**: the web-boost widget retried on timeout, creating
-multiple orders for the same invoice.
+**Treatment:** booked invoice-anchored (no order linkage) via the gated
+`POST /api/v1/reconcile/resolve` path on 2026-09-02.
 
-| Orders | Count | Total Sats |
-|--------|-------|------------|
-| All 2,222 sats, PENDING | 6 | 13,332 |
+**Why:** real settled receipt (LND settle 2026-08-07 03:36:14Z), memo names
+Memphis/LUP-670, and **no prior booking existed** for Memphis on that episode.
+The message is unrecoverable — the boost carries none rather than an invented
+one. Verify: `:boostagram/sender_name_normalized = "memphis"`,
+`value_sat_total = 2222`, episode 670, no `zaprite_order_id`.
 
-**Why the matcher refused:** Too many candidates with no distinguishing signal. The
-content-identity guard can't collapse them because they share the same (empty or
-identical) message. Group-aware COMPLETE-exclusion logic would help (exclude orders
-that completed other invoices), but that's future work.
+## Resolved — Hydragyrum, invoice `327805` (2,000 sats, LUP 668) ✅ ALREADY BOOSTED
 
-**Likely answer:** Any of the 6 orders is equally valid — they all represent the same
-payment. Pick the one with the earliest `createdAt` (first attempt, most likely the
-one that actually settled). The others are dead retries.
+**Treatment:** no write; reclassified as already-boosted.
 
-**Action:** Pick the earliest-created order. Transact a boost entity. The other 5
-stay dead.
+**Why:** both LUP-668 settlements are already represented by Hydragyrum's two
+COMPLETE orders. `od_ujd5Yk70Kv` paid 21:34:09 ↔ invoice `327806` (settle
+21:34:03). `od_hTEwY3DUVX` paid 21:30:34 but invoice `327805` settled at
+**20:45:29** — a **45-minute webhook lag**, not a second payment. Booking
+`327805` would have double-booked the same money.
 
----
-
-## 3. Hydragyrum — Invoice 327805 (2,000 sats, LUP 668)
-
-**What happened:** Hydragyrum boosted LUP 668 with 2,000 sats. Two candidate orders
-exist.
-
-| Order | Created | Status |
-|-------|---------|--------|
-| Candidate A | Earlier | PENDING |
-| Candidate B | Later | PENDING |
-
-**Why the matcher refused:** Two candidates, no COMPLETE-pairing signal (both
-PENDING), and the content-identity guard couldn't distinguish them.
-
-**Likely answer:** Same pattern as Memphis — the later-created order is the probable
-anchor. But with only 2 candidates and identical amounts, either is a reasonable pick.
-
-**Action:** Pick the later-created order. Transact a boost entity. The other stays dead.
+**Matcher fix shipped with it:** `pairs-with-complete?` now anchors on the LND
+`settle_epoch` (fallback: creation) with a **1-hour** window. Validated in both
+directions on live data — the 45-min lag pairs, while the Anon 81-min
+non-neighbor (below) correctly does not.
 
 ---
 
-## How to resolve
+## OPEN — Anon, invoice `323627` (2,222 sats, TWIB 108)
 
-1. Run `GET /api/v1/reconcile/preview` to see the current manual-review rows
-2. For each: pick the correct order (see guidance above)
-3. Transact via nREPL or a one-off route:
-   ```clojure
-   ;; Example: resolve Memphis
-   (d/transact! conn [{:boostagram/sender_name_normalized "memphis"
-                        :boostagram/value_sat_total 2222
-                        :boostagram/app_name "Zaprite"
-                        :boostagram/podcast "LINUX Unplugged"
-                        :boostagram/episode "670: ..."
-                        :boostagram/action "boost"
-                        :boostagram/type :sat
-                        :boostagram/zaprite_order_id "od_bY1at35Vl9"
-                        :invoice/identifier "zaprite-od_bY1at35Vl9"
-                        :invoice/creation_date <epoch>}])
-   ```
-4. Re-run preview — manual-review should drop by 1 for each resolved row
+**State:** remains in `manual-review` by deliberate choice. Nothing is broken;
+this is an accounting judgment call left open.
 
-Or leave them. They're3 invoices / ~6,444 sats that show in the report's
-"unmatched" informational bucket but don't affect ballers, fiat, or any
-money-critical view.
+**Evidence:**
+- Two Anon TWIB-108 2,222-sat boosts **already exist** and are booked
+  (`od_2QMi1ppumF` paid 06-10 21:41:44, message *"Capital gains tax this IRS."*;
+  `od_y7jTeGxbD1` paid 06-11 03:36:03, message *"Testing!"*), each paired to its
+  own invoice (`323503`, `323628`).
+- Invoice `323627` **did settle** (06-11 02:14:48Z) — real sats moved.
+- Its four remaining candidates are PENDING with `invoice: None` /
+  `transactions: []` — they never initiated payment. The order that actually
+  paid `323627` is not identifiable from the API.
+
+**Why left open:** a third identical-destination, identical-amount entry with
+no source document is the textbook double-count risk. Conservative treatment =
+leave it; the understatement is 2,222 immaterial and anonymous sats.
+
+**Options if you ever want to close it:**
+1. **Leave as-is (current).** Recommended. Manual-review is informational; the
+   row does not affect ballers, fiat, or any money-critical view.
+2. **Book it invoice-anchored** — flip `WEB_BOOST_RECONCILE_WRITE=true`, then
+   `POST /api/v1/reconcile/resolve {"identifier":"323627"}`, then flip the gate
+   back off. This books real sats that demonstrably settled; accept the
+   small risk that it was an aborted-checkout artefact rather than a
+   deliberate third boost.
+3. **Get better evidence** — Zaprite dashboard (order→payment linkage /
+   checkout logs for that window) would settle it definitively. The plain API
+   cannot.
+
+---
+
+## How to run a resolution (for any future manual-review row)
+
+The write path is gated by design; a resolution is a deliberate three-step
+sequence, never automatic:
+
+```bash
+# 1. Inspect current state (read-only)
+curl -s http://<host>:3223/api/v1/reconcile/preview | jq '.manual-review, .orphans'
+
+# 2. With the gate ON (flake: reconcileWrite = true; rebuild; deploy), resolve:
+curl -s -X POST http://<host>:3223/api/v1/reconcile/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"identifier":"<invoice-identifier>"}'
+#    optional: add "order-id":"od_..." to use that order's message/episode
+#    metadata (metadata only — payment state is never inferred from an order)
+
+# 3. Flip the gate back OFF (reconcileWrite = false; rebuild; deploy) and verify:
+#    manual-review should drop by one; the boost appears in reports/feed.
+```
+
+Responses: `200` written, `403` gate off, `404` unknown invoice, `409` already
+boosted (idempotent — no duplicate is created).

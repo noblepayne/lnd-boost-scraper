@@ -164,10 +164,13 @@ conventions; responses are plain detection JSON maps.
 - **Memo prefix variance (NEW, Phase 0)**: DB memos observed both with and without the
   `Payment for Web Boost: ` prefix (and possibly without any prefix) on different entities.
   Parser must accept all three forms (§5).
-- **Zaprite hides order `createdAt` / `paidAt` (NEW, Phase 0)**: the API exposes neither on
-  PENDING orders. The `memphis` pair (two PENDING orders, one settled + one canceled invoice)
-  cannot be disambiguated by time via API — stays manual-review; order-id ordering suggests
-  `od_bY1at35Vl9`=canceled, `od_vff0Bfkh8g`=settled, unconfirmed.
+- **Zaprite hides order `createdAt` / `paidAt` (Phase 0; REFINED 2026-09-02)**:
+  the API exposes neither on PENDING orders, and `createdAt` is absent on all
+  orders — but **`paidAt` IS returned on COMPLETE orders**, which is what makes
+  `pairs-with-complete?` possible. The original `memphis` note here is
+  **superseded**: that row was booked invoice-anchored on 2026-09-02 (the
+  candidates were PENDING checkout-abandonments with `invoice: None` /
+  `transactions: []`, not retry twins). See `docs/dev-log.md` 09-02.
 - **Extra scrape-cycle source**: `autoscrape-nodecan` uses `https://100.120.212.39:8080/v1/invoices`
   (`core.clj:183`), not the runbook's `100.115.78.27`; the reconcile must read entity identifiers
   consistent with whatever that live scrape stores. (Phase 0 box bot pulled from

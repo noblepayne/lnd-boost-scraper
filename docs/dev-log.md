@@ -7,6 +7,45 @@ Format: date · decision · why.
 
 ---
 
+## 2026-11-19 · Open items — consolidated watchlist (post-2.5-month regrounding)
+
+Re-grounded after a gap (last entry 2026-09-02). State snapshot:
+
+- **Repo**: `v2` @ `f462ad1`, clean, 123 tests / 744 assertions green.
+- **Live box**: service active, `reconcileWrite = false` (correct), reconciler
+  scanning **240** web-boost invoices → **239 already-boosted, 0 orphans,
+  0 unmatched, 1 manual-review**.
+- **Data**: fresh as of today (latest record same-day), **6,362** boost entities.
+- **The good news**: in September the scan covered 129 invoices; it is now 240.
+  **~111 new web-boost invoices arrived and every one resolved cleanly as
+  already-boosted — zero new orphans.** The lnbits/webhook fixes are holding.
+
+### Open items (nothing here is broken; these are decisions/plans)
+
+| # | Item | Status | Where it lives |
+|---|---|---|---|
+| 1 | **Anon invoice 323627** (2,222 sats, TWIB-108) | **OPEN** — stays in `manual-review` by deliberate choice. Two identical-destination anon bookings already exist; no source document distinguishes a third payment. Booking it risks double-counting; leaving it understates by 2,222 immaterial sats. Options spelled out in `docs/manual-review-guide.md`. | manual-review-guide + this log (09-02) |
+| 2 | **Datalevin 0.9.13 → 1.0.2** | **PLANNED, unscheduled.** Two hops: 0.9.13→0.9.27 (same minor, zero migration, reaches the auto-upgrade floor), then 0.9.27→1.0.2 (storage migration; prefer manual `dtlv` dump/load on NixOS for deterministic startup). Unlocks `*resolver-mode* :server-safe` (upstream's own RCE fix), `get-some-else`, `:db/udf`, and the 0.10+ planner/perf work. | `docs/datalevin-upgrade-plan.md` |
+| 3 | **Ballers inclusion for fiat-via-lightning** | **PRODUCT DECISION, punted.** Should fiat-denominated boosts that were actually paid in sats via nodecan LND also appear in the sats/ballers aggregation? Clean rule on the table: fiat-with-confirmed-BTC-tx → also ballers; card/PayPal stays fiat-only. Double-count implication needs deliberate acceptance. (Magnitude as measured 2026-08-29: ~415k sats visible only in the fiat section — re-measure before deciding.) | this log (08-29) |
+| 4 | **Schema-introspection endpoint** | **NOT BUILT.** `GET /api/v1/schema` (attributes + types + example values) would save any agent from reading `.clj` files to write Datalog. Named as a follow-up in the 09-01 entry. | this log (09-01) |
+
+### Resolved since the last entry (for the record)
+
+- **Manual-review picks**: Memphis 342724 booked (invoice-anchored, gated);
+  Hydragyrum 327805 reclassified already-boosted (webhook-lag false positive,
+  fixed by settle-anchored pairing + 1h window); Anon 323627 left (above).
+- **Query templates**: removed (broken duplicate of the analysis endpoints).
+- **Query-API cookbook + security rules**: shipped (`API.md`).
+- **`docs/manual-review-guide.md`**: was stale (said "three remain" and gave
+  advice the forensics contradicted) — rewritten to current reality.
+
+### Not part of this repo but adjacent
+
+The box `/etc/nixos` has moved independently since September: **lnbits now
+starts at boot** ("now that Lightning boosts are live"), lnbits GET-request
+auditing was added, and the kernel moved to 6.18 (from nixos-26.05) while
+staying on 25.11 userland. Those changes live in the box repo, not here.
+
 ## 2026-09-02 · Manual-review picks resolved — forensic finding + gated operator path
 
 ### The forensic finding (what the three "picks" actually are)
