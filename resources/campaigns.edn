@@ -22,12 +22,13 @@
    :campaign/description
    (str "Brent has been part of this ride since the beginning. For episode 700 "
         "we want him in the studio with Chris — in person, not over a link. "
-        "That means a flight and a place to stay, and we're tight right now.\n\n"
-        "Boost anything from episodes 694 through 700 with #700club in the "
-        "message, and it counts toward getting him here. Regular boosts still "
-        "support the show exactly as they always have — this is the same "
-        "support with a name on it. If we hit the goal, 700 happens in the "
-        "same room.")
+        "That means a flight from Sudbury and a place to stay, and we're tight "
+        "right now.\n\n"
+        "Boost anything from episodes 694 through 700 — pick the 700 Club on the "
+        "web boost form, or just add #700club to your message — and it counts "
+        "toward getting him here. Regular boosts still support the show exactly "
+        "as they always have; this is the same support with a name on it. If we "
+        "hit the goal, 700 happens in the same room.")
 
    ;; --- what qualifies ---
    :campaign/scope {:shows #{"lup"}}
@@ -47,7 +48,11 @@
              {:type :episode :show "lup" :episode "700"}]}
 
    ;; --- money ---
-   :campaign/target {:fiat-cents 150000}      ; USD 1,500
+   ;; $2,000 rather than today's ~$1.2-1.5k fare quote: fares move before we can
+   ;; book, and the goal is a reasonable itinerary from Sudbury (not making Brent
+   ;; get himself to Toronto first just to save us money). Better to over-raise
+   ;; than to under-deliver on the trip.
+   :campaign/target {:fiat-cents 200000}      ; USD 2,000
 
    ;; --- policy: what the meter counts ---
    :campaign/policy {:actions #{:boost}       ; no streams
