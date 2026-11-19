@@ -16,8 +16,8 @@
             [clojure.string :as str]
             [datalevin.core :as d]))
 
-(def ^:private cache-ttl-ms 300000)          ; schema changes rarely
-(defonce ^:private cache (atom nil))
+(def ^:private cache-ttl-ms 3600000)        ; an hour: attributes change rarely
+(defonce ^:private cache (atom {}))
 
 (def ^:private sample-attrs
   "Attributes with modest cardinality used to discover undeclared attributes.
@@ -57,7 +57,8 @@
        vec))
 
 (defn- count-entities
-  "Entity count for an attribute (index-backed)."
+  "Entity count for an attribute (index-backed, but still the expensive part of
+   a full description — ~1s/attribute live). Only computed when asked for."
   [db attr]
   (try (d/count-datoms db nil attr nil)
        (catch Throwable _ nil)))
@@ -87,46 +88,51 @@
    (boost-scraper.db/schema) — NOT merely present in Datalevin's own schema,
    because Datalevin auto-registers attributes it has seen, which would make
    every attribute look declared."
-  [db dal-schema app-attrs attr]
+  [db dal-schema app-attrs attr counts?]
   (let [props (get dal-schema attr)
         value-type (or (:db/valueType props)
                        (some-> (sample-values db attr 1) first infer-type))]
     (cond-> {:attribute (str attr)
              :declared (contains? app-attrs attr)
              :type (type-name value-type)
-             :entities (count-entities db attr)
              :examples (sample-values db attr 3)}
+      counts? (assoc :entities (count-entities db attr))
       props (assoc :cardinality (type-name (:db/cardinality props))
                    :unique (type-name (:db/unique props))))))
 
 (defn describe
   "Full schema description:
-   {:attributes [{:attribute :declared :type :entities :examples ...}]
+   {:attributes [{:attribute :declared :type :examples ...}]
     :counts {:declared N :undeclared M :total T}
-    :notes {...}}"
-  [conn]
-  (let [db (d/db conn)
-        dal-schema (d/schema conn)
-        app-attrs (set (keys db/schema))
-        observed (observed-attrs db)
-        all-attrs (into (set (keys dal-schema)) observed)
-        entries (->> all-attrs
-                     (map #(attr-entry db dal-schema app-attrs %))
-                     (sort-by (juxt #(if (:declared %) 0 1) :attribute)))]
-    {:attributes (vec entries)
-     :counts {:declared (count (filter :declared entries))
-              :undeclared (count (remove :declared entries))
-              :total (count entries)}
-     :notes {:declared "In the application schema (boost-scraper.db/schema)."
-             :undeclared "Observed in the data but absent from the application schema — queryable, and worth knowing about (e.g. :boostagram/sender_id was found this way)."
-             :sampling (str "Undeclared attributes are discovered from up to "
-                            sample-entities-per-attr " entities per sample attribute: "
-                            (pr-str sample-attrs))}}))
+    :notes {...}}
+
+   opts :: {:counts? false}  — entity counts cost ~1s per attribute live
+                              (54 attributes ≈ 1m45s), so they are opt-in."
+  ([conn] (describe conn {}))
+  ([conn {:keys [counts?]}]
+   (let [db (d/db conn)
+         dal-schema (d/schema conn)
+         app-attrs (set (keys db/schema))
+         observed (observed-attrs db)
+         all-attrs (into (set (keys dal-schema)) observed)
+         entries (->> all-attrs
+                      (map #(attr-entry db dal-schema app-attrs % counts?))
+                      (sort-by (juxt #(if (:declared %) 0 1) :attribute)))]
+     {:attributes (vec entries)
+      :counts {:declared (count (filter :declared entries))
+               :undeclared (count (remove :declared entries))
+               :total (count entries)}
+      :notes {:declared "In the application schema (boost-scraper.db/schema)."
+              :undeclared "Observed in the data but absent from the application schema — queryable, and worth knowing about (e.g. :boostagram/sender_id, :boostagram/boost_link, :boostagram/name were each found this way)."
+              :entity-counts (if counts? "included" "omitted; add ?counts=true (slow: ~1s/attribute)")
+              :sampling (str "Undeclared attributes are discovered from up to "
+                             sample-entities-per-attr " entities per sample attribute: "
+                             (pr-str sample-attrs))}})))
 
 (defn filtered
   "describe, optionally narrowed by a substring match on the attribute name."
-  [conn {:keys [q]}]
-  (let [d (describe conn)]
+  [conn {:keys [q counts?]}]
+  (let [d (describe conn {:counts? counts?})]
     (if (seq q)
       (update d :attributes (fn [as] (filterv #(str/includes?
                                                 (str/lower-case (:attribute %))
@@ -135,13 +141,15 @@
       d)))
 
 (defn cached
-  "describe with a 5-minute cache (schema changes rarely; counting every
-   attribute on each request is wasteful)."
+  "describe with an hourly cache. Cache key includes the filter and the
+   counts flag, so the expensive variant never poisons the fast one."
   [conn opts]
-  (let [now (System/currentTimeMillis)
-        [at v] @cache]
-    (if (and v (< (- now at) cache-ttl-ms))
+  (let [k [(str (:q opts)) (boolean (:counts? opts))]
+        now (System/currentTimeMillis)
+        hit (get @cache k)
+        [at v] hit]
+    (if (and hit (< (- now at) cache-ttl-ms))
       v
       (let [d (filtered conn opts)]
-        (reset! cache [now d])
+        (swap! cache assoc k [now d])
         d))))

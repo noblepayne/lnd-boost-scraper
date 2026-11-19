@@ -44,10 +44,14 @@
       (is (some? podcast))
       (is (true? (:declared podcast)))
       (is (= "db.type/string" (:type podcast))))
-    (testing "entity counts are populated"
-      (is (pos? (:entities podcast))))
     (testing "examples come from real data"
-      (is (= ["LINUX Unplugged"] (:examples podcast))))))
+      (is (= ["LINUX Unplugged"] (:examples podcast))))
+    (testing "entity counts are opt-in (they cost ~1s/attribute live)"
+      (is (not (contains? podcast :entities)))
+      (let [with-counts (into {} (map (juxt :attribute identity)
+                                      (:attributes (schema/describe *conn* {:counts? true}))))
+            p2 (get with-counts ":boostagram/podcast")]
+        (is (pos? (:entities p2)))))))
 
 (deftest test-describe-discovers-undeclared-attributes
   (seed!)
