@@ -24,6 +24,8 @@
 
    ;; --- public copy (first draft; edit freely) ---
    :campaign/title "Get Brent in the Studio for LUP 700"
+   :campaign/subtitle
+   "Studio time, travel, and a decent chair."
    :campaign/description
    (str "Brent has been part of this ride since the beginning. For episode 700 "
         "we want him in the studio with Chris — in person, not over a link. "
