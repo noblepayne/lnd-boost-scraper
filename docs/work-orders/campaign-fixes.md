@@ -125,9 +125,9 @@ for no user-visible benefit.
 
 ## Follow-ups from the fiat verification (2026-11-20)
 
-- **Whole dollars now yield to cents below $10** (`web-boost ad7f175`). \$0.87
-  used to render as "\$1", overstating the most visible number on the page by 13
-  cents. Above \$10 the cents return to being noise against a four-figure goal.
+- **Whole dollars now yield to cents below $10** (`web-boost ad7f175`). $0.87
+  used to render as "$1", overstating the most visible number on the page by 13
+  cents. Above $10 the cents return to being noise against a four-figure goal.
 - **Tag matching is pinned against punctuation** (`scraper 215fdca`).
   `#700club!`, `#700club.`, `#700club,`, `(#700club)`, `#700CLUB?` all count,
   because the rule is case-insensitive containment. Accepted trade: a longer
