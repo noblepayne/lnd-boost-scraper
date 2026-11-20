@@ -63,6 +63,15 @@ with lib; let
       default = "";
       description = "R2 bucket name for member boost records.";
     };
+    r2CampaignBucket = mkOption {
+      type = types.str;
+      default = "";
+      description = ''
+        R2 bucket the campaign meter artifact is published to. Empty disables
+        publishing (the publisher warns once and leaves any existing object
+        untouched rather than writing a partial meter).
+      '';
+    };
     pkg = mkOption {
       type = types.package;
       defaultText = "config.lnd-boost-scraper.pkg";
@@ -122,6 +131,7 @@ in {
         R2_SECRET_ACCESS_KEY_PATH = cfg.r2SecretAccessKeyPath;
         R2_ACCOUNT_ID = cfg.r2AccountId;
         R2_BOOST_BUCKET = cfg.r2BoostBucket;
+        R2_CAMPAIGN_BUCKET = cfg.r2CampaignBucket;
       };
     };
   };

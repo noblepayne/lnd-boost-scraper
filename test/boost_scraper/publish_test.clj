@@ -105,11 +105,11 @@
       (is (> (:at (first (:recent payload))) (:at (last (:recent payload)))))
       (is (= (+ OPEN 10 24) (:at (first (:recent payload))))))
     (testing "recent entries carry the contract fields"
-      (is (every? #(= #{:sats :usd :sender :at :message} (set (keys %)))
-                  (:recent payload)))
+      (is (every? #(= #{:sats :usd :sender :at} (set (keys %)))
+                  (:recent payload))
+          "names are published; message text is not")
       (is (= "user-24" (:sender (first (:recent payload)))))
-      (is (= 1024 (:sats (first (:recent payload)))))
-      (is (= "#700club" (:message (first (:recent payload))))))))
+      (is (= 1024 (:sats (first (:recent payload))))))))
 
 (deftest test-no-rate-skips-put-and-does-not-throw
   (insert! (boost {:sender "alice" :sats 1000 :msg "#700club" :iid "nr-1"}))

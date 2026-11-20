@@ -18,8 +18,7 @@
             [cheshire.core :as json]
             [clojure.string :as str]
             [cognitect.aws.client.api :as aws]
-            [cognitect.aws.credentials :as credentials]
-            [datalevin.core :as d]))
+            [cognitect.aws.credentials :as credentials]))
 
 (def ^:private put-timeout-ms 30000)
 
@@ -98,117 +97,6 @@
 ;; private helpers.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private message-query
-  '[:find (pull ?e [:db/id
-                    :boostagram/message
-                    :boostagram/zaprite_order_id
-                    :invoice/identifier])
-    :in $ ?since ?until
-    :where
-    [?e :boostagram/message _]
-    [?e :invoice/creation_date ?cd]
-    [(>= ?cd ?since)]
-    [(<= ?cd ?until)]])
-
-(defn- message-match? [message tag]
-  (and (some? message) (some? tag) (not (str/blank? (str tag)))
-       (str/includes? (str/lower-case (str message)) (str/lower-case (str tag)))))
-
-(defn- payment-ids [oid iid entity]
-  (cond-> #{(str "entity:" entity)}
-    (not (str/blank? (str oid))) (conj (str "zaprite:" oid))
-    (not (str/blank? (str iid))) (conj (str "invoice:" iid))))
-
-(defn- tagged-ids [conn from to tag]
-  (if (str/blank? (str tag))
-    #{}
-    (->> (d/q message-query (d/db conn) (long from) (long to))
-         (map (fn [[m]] m))
-         (filter #(message-match? (:boostagram/message %) tag))
-         (into #{} (mapcat #(payment-ids (:boostagram/zaprite_order_id %)
-                                         (:invoice/identifier %)
-                                         (:db/id %)))))))
-
-(defn- episode-matches? [want episode]
-  (let [want (str want)
-        ep (str episode)]
-    (or (= want ep)
-        (str/starts-with? ep (str want ":"))
-        (str/starts-with? ep (str want " ")))))
-
-(defn- member? [tagged also-episode contribution]
-  (or (contains? tagged (:contribution/payment-id contribution))
-      (and (some? also-episode)
-           (not (str/blank? (str also-episode)))
-           (episode-matches? also-episode (:contribution/episode contribution)))))
-
-(defn- shows-regex [campaign]
-  (->> (get-in campaign [:campaign/scope :shows])
-       (keep #(-> % shows/resolve-show :regex))
-       (str/join "|")))
-
-(defn- round-to [x places]
-  (let [scale (Math/pow 10.0 (double places))]
-    (/ (Math/round (* (double x) scale)) scale)))
-
-(defn- usd-value [sats cents btc-usd]
-  (+ (/ (* (double (long (or sats 0))) (double btc-usd)) 1e8)
-     (/ (double (long (or cents 0))) 100.0)))
-
-(defn- value-of [policy contribution]
-  (let [{:keys [:contribution/type :contribution/sats :contribution/fiat-cents]} contribution
-        fiat? (get policy :count-fiat? true)]
-    {:sats (if (= :sat type) (long (or sats 0)) 0)
-     :cents (cond
-              (and (= :fiat type) fiat?) (long (or fiat-cents 0))
-              (and (= :member-free type)
-                   fiat?
-                   (get policy :count-member-free? false)) (long (or fiat-cents 0))
-              :else 0)}))
-
-(defn- counted-contributions [conn campaign]
-  (let [{:keys [opens closes]} (:campaign/window campaign)
-        to (dec (long closes))
-        policy (:campaign/policy campaign)
-        all (contributions/contributions
-             conn (cond-> {:from (long opens)
-                           :to to
-                           :actions (get policy :actions #{:boost})
-                           :exclude-self? (get policy :exclude-self? true)}
-                    (seq (get-in campaign [:campaign/scope :shows]))
-                    (assoc :show-regex (shows-regex campaign))))
-        tagged (tagged-ids conn (long opens) to (:campaign/tag campaign))
-        also-episode (:campaign/also-episode campaign)]
-    (filterv #(member? tagged also-episode %) all)))
-
-(defn recent-entries
-  "Newest-first recent contributions for a campaign, capped at 20. Uses the
-   BTC/USD rate from the computed progress map so per-entry USD matches the
-   contract's conversion. Message text is read per entity; sender is the
-   contribution handle, or \"anonymous\" for the anonymity bucket."
-  [conn campaign progress-map]
-  (let [campaign (campaigns/find-campaign campaign)
-        btc-usd (double (get-in progress-map [:rate :btc_usd]))
-        policy (:campaign/policy campaign)
-        counted (counted-contributions conn campaign)]
-    (->> counted
-         (sort-by :contribution/occurred-at #(compare %2 %1))
-         (take 20)
-         (mapv (fn [c]
-                 (let [{:keys [sats cents]} (value-of policy c)
-                       sender (let [h (:contribution/handle c)]
-                                (if (= :anonymous (:contribution/handle-class c))
-                                  "anonymous"
-                                  (or h "anonymous")))
-                       msg (:boostagram/message (d/pull (d/db conn)
-                                                        [:boostagram/message]
-                                                        (:contribution/entity c)))]
-                   {:sats (long sats)
-                    :usd (round-to (usd-value sats cents btc-usd) 2)
-                    :sender sender
-                    :at (:contribution/occurred-at c)
-                    :message (or msg "")}))))))
-
 (defn- publish-one!
   "Compute and publish a single campaign. Returns a result map describing what
    happened; never throws."
@@ -227,7 +115,7 @@
               {:slug slug :result (:status progress)})
 
           :else
-          (let [recent (recent-entries conn campaign progress)
+          (let [recent (campaigns/recent conn (campaigns/find-campaign campaign) (:rate progress))
                 payload (assoc progress :recent recent)
                 body (json/generate-string payload)
                 put-result (try (put-fn slug body) (catch Throwable t {:publish/error t}))]
