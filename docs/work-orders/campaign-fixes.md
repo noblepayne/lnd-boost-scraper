@@ -2,8 +2,9 @@
 
 Post-launch fixes and coverage. The meter is live (2026-11-20).
 
-**Status: W8 DONE and deployed 2026-11-20** (`web-boost 53f4f2b`, verified in the
-shipped bundle). W9 and W10 open; the manual items are untouched.
+**Status: W8, W9 and W10 DONE 2026-11-20.** Code shipped and verified in
+production (`web-boost 53f4f2b`, `scraper 8e1544a`); the campaign endpoints are
+documented in `API.md`. Only the manual items remain.
 
 Decisions already taken (do not relitigate):
 - Zero-state meter stays visible — `$0.00 of $2,000` is honest.
@@ -49,7 +50,13 @@ no revaluation logic added.
 
 ---
 
-## W9 — Make publishing observable
+## W9 — Make publishing observable — DONE
+
+Shipped in `scraper 8e1544a`. Production line:
+
+```
+Campaign published lup-700-brent: $0.87 raised (1477 sats, 2 contributions), rate 58990 USD/BTC (mempool.space)
+```
 
 A successful publish is silent, so "is it publishing?" can only be answered by
 fetching from R2. That is the difference between a 2-minute and a 20-minute
@@ -67,7 +74,11 @@ existing skip message.
 
 ---
 
-## W10 — Document the campaign surface
+## W10 — Document the campaign surface — DONE
+
+Written into `API.md` §Campaigns, including the emit-time valuation rule, the
+`sats`-is-stable guidance, the one-decimal `percent` rounding, and why the public
+path must never carry `s-maxage`.
 
 `API.md` covers feed, analysis, schema and boosties but not campaigns.
 

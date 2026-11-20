@@ -204,6 +204,86 @@ Response: `{"apps": [["Fountain", 68.95], ["Podverse", 7.82], ...]}`
 
 ---
 
+## Campaigns
+
+A campaign is a **lens** on boosts already ingested, not a separate pipeline: a
+tag, a window, and a goal. Attribution is one representation — the tag in the
+message (the web boost form appends it server-side, so it cannot be dropped or
+typo'd) or a boost on the campaign's episode. There is no metadata field and no
+matcher language.
+
+Definitions live in `resources/campaigns.edn` and ship with the service.
+
+### `GET /api/v1/campaigns`
+
+Index: what exists and whether it is open. `state` is `scheduled`, `active`, or
+`closed`, derived from the window and the server clock.
+
+```json
+{"campaigns":[{"slug":"lup-700-brent","title":"Get Brent in the Studio for LUP 700","state":"active"}]}
+```
+
+### `GET /api/v1/campaigns/:slug`
+
+The meter contract plus `recent`. An unknown slug is `404`. An unavailable
+BTC/USD rate is `503`, and that body **carries no numbers** — a meter built on an
+invented rate is worse than no meter.
+
+```json
+{
+  "slug": "lup-700-brent",
+  "generated_at": 1795211811,
+  "title": "Get Brent in the Studio for LUP 700",
+  "subtitle": "Studio time, travel, and a decent chair.",
+  "tag": "#700club",
+  "goal": { "usd": 2000.0, "sats": 3386903 },
+  "raised": { "usd": 0.87, "sats": 1477, "contributions": 2, "people": 2, "anonymous": 0 },
+  "percent": 0.0,
+  "remaining_usd": 1999.13,
+  "days_left": 52,
+  "opens_at": 1795075200,
+  "closes_at": 1799654400,
+  "rate": { "btc_usd": 59051.0, "at": 1795211811, "source": "mempool.space" },
+  "cta": { "label": "Boost with #700club", "url": "https://boost.jupiterbroadcasting.com/" },
+  "recent": [{ "sats": 777, "usd": 0.46, "sender": "friendsofbangbus", "at": 1795211768 }]
+}
+```
+
+What the numbers mean:
+
+- `generated_at` is when this payload was emitted, not when a boost happened.
+- `goal.sats` is the fiat goal converted at `rate`, so it drifts as BTC moves.
+- `raised.sats` is the stable total. `raised.usd` is converted at **emit time**
+  with a single rate applied to the whole total, so it revalues on every publish
+  and can retreat when BTC falls. If you need a number that never moves
+  backwards, use `sats`.
+- `percent` is one-decimal, so a sub-0.05% total legitimately rounds to `0.0`. A
+  renderer should floor the fill width instead of showing an empty bar.
+- `remaining_usd` is the publisher's own arithmetic; prefer it over subtracting.
+- `recent` is newest first and capped at 20, and carries **names, not messages**:
+  `sender`, `sats`, `usd`, `at`. Anonymous boosters appear as `"anonymous"`.
+- Self-boosts (`chrislas`, `noblepayne`) are excluded by policy.
+
+### `GET /api/campaign/:slug` (public)
+
+Served by the web boost site's Pages Function from the artifact the scraper
+publishes to R2 at `campaign/<slug>.json`. The scraper itself is never exposed;
+the artifact is the only interface.
+
+- `Cache-Control: public, max-age=20, stale-while-revalidate=120,
+  stale-if-error=86400`, plus an `ETag`.
+- Never `s-maxage` — a shared cache holding a stale meter would publish a number
+  that is already wrong.
+- A missing or unreadable artifact answers `503` with `no-store` and
+  `Retry-After`, never an empty or zeroed meter.
+- `HEAD` mirrors `GET` (status and headers, no body), so a probe cannot fall
+  through to the app shell.
+
+The page hides the card rather than rendering `$0` when the payload is absent,
+malformed, or older than 30 minutes.
+
+---
+
 ## Feed
 
 ### Get Boosts
