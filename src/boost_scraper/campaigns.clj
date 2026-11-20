@@ -239,6 +239,9 @@
      ;; No editorial invention: a campaign without a subtitle publishes "" and
      ;; the card renders one line less.
      :subtitle (or (:campaign/subtitle campaign) "")
+     ;; The one-line reason. The page lede and the card both read it; kept
+     ;; separate from :subtitle so flavour and pitch can change independently.
+     :pitch (or (:campaign/pitch campaign) "")
      :tag (:campaign/tag campaign)
      ;; Rendered only when the goal is met; published always so the card never
      ;; has to be redeployed to change one line of copy.

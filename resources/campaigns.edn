@@ -24,6 +24,10 @@
 
    ;; --- public copy (first draft; edit freely) ---
    :campaign/title "Get Brent in the Studio for LUP 700"
+   ;; One sentence for the page lede and the card. Distils :campaign/description,
+   ;; and sets up the stretch line's chair.
+   :campaign/pitch
+   "Brent has been part of this ride since the beginning. For 700 we're bringing him in from Sudbury — a flight, a bed, and a decent chair."
    :campaign/subtitle
    "Studio time, travel, and a decent chair."
    :campaign/description

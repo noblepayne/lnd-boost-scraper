@@ -109,7 +109,7 @@
                    :action "stream" :iid "g-6"}))
   (let [p (progress test-campaign)]
     (testing "shape: the contract minus `recent`, and nothing else"
-      (is (= #{:slug :title :subtitle :tag :stretch :goal :raised :split :remaining_usd
+      (is (= #{:slug :title :subtitle :pitch :tag :stretch :goal :raised :split :remaining_usd
                :percent :days_left :opens_at :closes_at :generated_at :rate :cta}
              (set (keys p))))
       (is (= "test-camp" (:slug p)))
@@ -117,6 +117,7 @@
       (is (= "One line of copy." (:subtitle p)))
       (is (= "#700club" (:tag p)))
       (is (= "" (:stretch p)) "a campaign without stretch copy publishes empty")
+      (is (= "" (:pitch p)) "a campaign without a pitch publishes empty")
       (is (= {:label "Boost with #700club" :url "https://example.test/"} (:cta p)))
       (is (= NOW (:generated_at p)))
       (is (= OPEN (:opens_at p)))
@@ -335,7 +336,8 @@
         (is (pos? (:days_left p)))
         (is (= opens (:opens_at p)))
         (is (string? (:stretch p)))
-        (is (seq (:stretch p)) "the shipped campaign carries over-goal copy")))))
+        (is (seq (:stretch p)) "the shipped campaign carries over-goal copy")
+        (is (seq (:pitch p)) "the shipped campaign carries a one-line pitch")))))
 
 (deftest test-also-episode-matches-by-prefix
   (testing "episode labels carry titles, so the finale matches as a prefix"

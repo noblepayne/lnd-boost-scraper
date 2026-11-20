@@ -236,6 +236,7 @@ invented rate is worse than no meter.
   "title": "Get Brent in the Studio for LUP 700",
   "subtitle": "Studio time, travel, and a decent chair.",
   "tag": "#700club",
+  "pitch": "Brent has been part of this ride since the beginning. For 700 we want him in the studio — a flight, a bed, and a decent chair.",
   "stretch": "Every dollar past the goal buys a better chair.",
   "goal": { "usd": 2000.0, "sats": 3386903 },
   "raised": { "usd": 2.87, "sats": 1477, "contributions": 3, "people": 2, "anonymous": 0 },
@@ -266,6 +267,9 @@ What the numbers mean:
   expressed in sats. Once fiat is in the mix, `raised.sats` against `goal.sats`
   is not a fraction: a $2.00 boost adds dollars and zero sats. Use `raised.usd`
   against `goal.usd`, or use `split`.
+- `pitch` is the one-line reason to contribute, used as the page lede and as the
+  card's supporting sentence. `subtitle` is flavour and is not the pitch; they are
+  separate so either can change without the other. Empty when unset.
 - `stretch` is one line of over-goal copy from the campaign config. It is
   published whether or not the goal is met, so changing the joke never needs a
   frontend deploy; render it only when `raised.usd > goal.usd`. Empty when unset.
