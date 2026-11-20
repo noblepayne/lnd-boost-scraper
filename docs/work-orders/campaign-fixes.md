@@ -38,8 +38,11 @@ total on each publish. The sentence is false.
 `percent` rounds to one decimal, so $0.87 of $2,000 is `0.0` and the fill is
 zero-width — indistinguishable from zero support.
 
-- Give the fill a minimum width (~2–3px) whenever `raised.usd > 0` and the
-  computed percentage rounds below visibility.
+- Give the fill a minimum width (~2–3px) whenever `raised.usd > 0`. The first
+  fix only fired when `percent` rounded to zero; the fiat boost produced `0.1`,
+  which is greater than zero and still about half a pixel on a real bar. A
+  min-width is inert at 62% and correct at 0.1%, so it applies to any nonzero
+  total.
 - Do not invent precision in the text: `$0.87 of $2,000` stays exact. Only the
   *fill* gets a floor.
 - Guard: an exact zero must still render an empty bar.
@@ -100,9 +103,10 @@ Acceptance: a reader can call every endpoint correctly without reading source.
 
 ## Manual / calendar — no work order
 
-- **Fiat path unverified live.** All counted contributions so far are sats. A
-  single $2.00 USD boost tagged `#700club` exercises `amount_fiat_cents` →
-  USD in the meter. Worth doing before launch promotion.
+- ~~**Fiat path unverified live.**~~ **VERIFIED 2026-11-20.** A $2.00 USD tagged
+  boost moved the meter $0.87 → $2.87 with `sats` correctly unchanged at 1,477
+  and `people` still 2 (the same handle boosted twice). The journal showed the
+  transition, and the artifact followed one cycle later.
 - **Browser check.** The card and `?campaign=` preselection have never been
   seen rendering (chrome MCP exposes no tools in the agent session). Open
   `https://boost.jupiterbroadcasting.com/?campaign=lup-700-brent` and confirm:
@@ -118,3 +122,13 @@ Acceptance: a reader can call every endpoint correctly without reading source.
 Bumping wrangler to fix `r2 object get` (workerd SQLite bug). The
 `curl --aws-sigv4` workaround is adequate and upgrading mid-campaign adds risk
 for no user-visible benefit.
+
+## Follow-ups from the fiat verification (2026-11-20)
+
+- **Whole dollars now yield to cents below $10** (`web-boost ad7f175`). \$0.87
+  used to render as "\$1", overstating the most visible number on the page by 13
+  cents. Above \$10 the cents return to being noise against a four-figure goal.
+- **Tag matching is pinned against punctuation** (`scraper 215fdca`).
+  `#700club!`, `#700club.`, `#700club,`, `(#700club)`, `#700CLUB?` all count,
+  because the rule is case-insensitive containment. Accepted trade: a longer
+  word containing the tag also matches.
