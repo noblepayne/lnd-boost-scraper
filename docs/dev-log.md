@@ -7,6 +7,61 @@ Format: date · decision · why.
 
 ---
 
+## 2026-11-20 · Review doctrine corrected: eyes on the files beat a different model
+
+### What happened
+
+Before the campaign-meter rollout, a review was dispatched to a deliberately
+*different* model than the author (`beam-free` vs `deepseek-v4.1-flash`), on the
+reasoning that reviewers should not share the editor's model.
+
+It found three real launch blockers, all verified against the code afterwards:
+
+1. `module.nix` never set `R2_CAMPAIGN_BUCKET`, so the publisher's config gate
+   fails and the meter 503s forever — green build, one line in a log.
+2. `publish.clj` still carried its own `recent` projection (and published
+   message text we had decided not to publish). **A commit message four commits
+   earlier claimed this had been consolidated. It had not.**
+3. The 503 branch sent no `Cache-Control`, so "unavailable" could be cached
+   while the 200's `stale-if-error` window kept a stale number alive.
+
+### The correction
+
+The review's value did **not** come from the model being different. It came from
+fresh eyes on the actual files. The author had been carrying a mental model of
+the code that was one commit out of date — a *context* failure, not a capability
+one.
+
+**Standing order, most important first:**
+
+1. **Instructions and context** — specific files, specific failure to hunt.
+2. **Tools and setup** — reading the real code beats reasoning about it.
+3. **Model capability** — use the strongest available reviewer.
+4. **Model diversity** — a tiebreaker for correlated failure modes in a fan-out,
+   never a reason to pick a weaker model for a one-off review.
+
+The same ordering applies to dispatching workers generally: a precise brief to a
+good model beats a vague brief to a great one, and both beat a "diverse" model
+chosen for its difference.
+
+### The operational rules that follow
+
+- **Dispatch reviews with file paths, not just the plan.** "Read these files and
+  find where a green build ships a broken meter" produced the findings; "review
+  this plan" would not have.
+- **A commit message is a claim, and claims get checked.** The worst finding was
+  not the duplicate code — it was that the message said it was gone. Grep for
+  the duplicate before writing "consolidated"; if the message and the diff
+  disagree, the message is the bug.
+- **Verify a reviewer's findings against the code before acting on them.** All
+  three held. One suggestion (lower `stale-if-error`) was declined with a
+  reason: the card already hides itself after 30 minutes from the artifact's
+  own `generated_at`, so a cached payload cannot masquerade as current.
+
+Cost of the correction: three small commits (`1267967`, `931728f`) and a net
+−118 lines. Cost of not catching them: a meter that never displayed, discovered
+on air.
+
 ## 2026-11-20 · Campaigns simplified: one representation (tag in the message)
 
 ### The critique that prompted it
