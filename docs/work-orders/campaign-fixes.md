@@ -132,3 +132,60 @@ for no user-visible benefit.
   `#700club!`, `#700club.`, `#700club,`, `(#700club)`, `#700CLUB?` all count,
   because the rule is case-insensitive containment. Accepted trade: a longer
   word containing the tag also matches.
+
+---
+
+## W11 — Publish the sats/fiat split — DONE (2026-11-20)
+
+Raised by Chris: *"how do we sort out when it comes in mixed as sats and USD?"*
+and *"I wonder if we want easy reporting on that"*.
+
+The contract already implied the answer — the goal is a fiat obligation, so
+dollars are authoritative — but it never said where the money came from.
+`raised.sats` read like "the total, in sats" when it is really "the sats rail",
+so comparing it to `goal.sats` produced a fraction that cannot reach 1.
+
+Shipped in `5e99e74`. The artifact now carries:
+
+```
+"split": {
+  "sats": { "usd": 0.87, "sats": 1477, "contributions": 2 },
+  "fiat": { "usd": 2.00, "sats": 0,    "contributions": 1 }
+}
+```
+
+Each part is rounded before they are summed, so
+`split.sats.usd + split.fiat.usd == raised.usd` to the cent. That invariant is
+what makes it usable for reporting rather than decorative, and it is pinned by
+the golden-contract test.
+
+The accounting reason it exists: sats can be sold or borrowed against, fiat is
+simply spent. At the end of the campaign the mix is the difference between "we
+raised $2,000" and "we hold $X of exposure and $Y of cash".
+
+---
+
+## W12 — Over-goal treatment (option C) — DONE (2026-11-20)
+
+Past the goal the card said "goal met" — the same two words as landing exactly on
+it — and threw away the overage the backend already computed.
+
+Three parts, all card-side except the copy:
+
+1. **The number**: `$2,410 of $2,000` and `$410 past the goal`.
+2. **The percent**: `121% of goal` in the foot.
+3. **The reason**: `:campaign/stretch` from the campaign config, published in the
+   artifact so the line can be rewritten without a frontend deploy. Rendered only
+   when the overage is real — at exactly $2,000 it would claim money that has not
+   arrived.
+
+Plus a one-shot pulse on the poll where the goal is crossed. It fires only on a
+false→true transition, so a first paint that is already over goal stays quiet;
+otherwise every visitor would get the animation for a campaign that crossed days
+ago. Reduced motion gets none of it.
+
+Also fixed while there: `aria-valuenow` was publishing above `aria-valuemax` when
+over goal, which is invalid ARIA.
+
+Deliberately not done: rescaling the bar past 100% (it erases the achievement and
+misstates the goal), and any confetti dependency.
