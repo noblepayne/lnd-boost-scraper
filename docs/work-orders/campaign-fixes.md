@@ -1,7 +1,9 @@
 # Work Orders — Campaign Meter Follow-ups
 
-Post-launch fixes and coverage. The meter is live (2026-11-20); none of this is
-urgent except **W8**, which corrects a false claim on a public page.
+Post-launch fixes and coverage. The meter is live (2026-11-20).
+
+**Status: W8 DONE and deployed 2026-11-20** (`web-boost 53f4f2b`, verified in the
+shipped bundle). W9 and W10 open; the manual items are untouched.
 
 Decisions already taken (do not relitigate):
 - Zero-state meter stays visible — `$0.00 of $2,000` is honest.
@@ -11,7 +13,11 @@ Decisions already taken (do not relitigate):
 
 ---
 
-## W8 — Correct what the meter claims (do first)
+## W8 — Correct what the meter claims — DONE
+
+Shipped in `web-boost 53f4f2b`; production verified: new copy present in the
+bundle, old false copy absent, 3px floor present, endpoint unchanged.
+146 → 149 tests.
 
 Two defects, both visible to listeners.
 
