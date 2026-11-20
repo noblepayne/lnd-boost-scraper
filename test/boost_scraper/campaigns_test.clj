@@ -148,6 +148,22 @@
     (is (= 3000 (get-in p [:raised :sats])))
     (is (= 2 (get-in p [:raised :contributions])))))
 
+(deftest test-tag-survives-trailing-punctuation
+  ;; Listeners type the tag by hand, usually at the end of a sentence. The rule
+  ;; is case-insensitive containment, so terminal punctuation cannot break it —
+  ;; pinned here because an "exact tag" refactor would silently stop counting
+  ;; real boosts, and the loss would be invisible (the meter just sits lower).
+  ;; The trade is accepted: a longer word containing the tag also matches.
+  (insert! (boost {:sender "a" :sats 1000 :msg "lets go #700club!" :iid "p-1"})
+           (boost {:sender "b" :sats 2000 :msg "sent. #700club." :iid "p-2"})
+           (boost {:sender "c" :sats 3000 :msg "#700club, obviously" :iid "p-3"})
+           (boost {:sender "d" :sats 4000 :msg "(#700club)" :iid "p-4"})
+           (boost {:sender "e" :sats 5000 :msg "#700CLUB?" :iid "p-5"})
+           (boost {:sender "f" :sats 6000 :msg "no tag here" :iid "p-6"}))
+  (let [p (progress test-campaign)]
+    (is (= 15000 (get-in p [:raised :sats])) "every punctuated form counts")
+    (is (= 5 (get-in p [:raised :contributions])) "the untagged boost still does not")))
+
 (deftest test-episode-membership
   (testing "the finale episode counts even with no tag in the message"
     (insert! (boost {:sender "alice" :sats 5000 :msg "no tag" :episode "700" :iid "e-1"}))
