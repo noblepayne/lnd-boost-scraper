@@ -1,8 +1,9 @@
 # Work Order — LUP 700 Campaign Meter
 
-Status: **W1-W4 complete and green; W5-W7 remaining.**
-Batches A and B are committed (scraper 174 tests / 964 assertions; web-boost
-113 tests). Nothing is deployed yet.
+Status: **W1-W5 complete and green; W7.1-W7.4 DONE (live in production 2026-11-20); W6 docs and W7.5 funding snippet remain.**
+Scraper 175 tests / 970 assertions; web-boost 146 tests. The meter is LIVE:
+the scraper publishes the artifact and the Pages Function serves it. W6 docs and
+the feed-host funding tag are the only remaining items.
 Date: 2026-11-20. Owner: driver session. Repos: `lnd-boost-scraper`, `web-boost`.
 
 ## Objective

@@ -754,3 +754,52 @@ Follow-up probing after the backfill changed the picture substantially:
   order tie-break + content-identity guard; plus the durable worker fix — euid tail in the
   invoice memo). Dashboard-access notes if the user obtains elevated access:
   `docs/zaprite-access-notes.md`.
+---
+
+## 2026-11-20 · Campaign meter live in production
+
+### What shipped
+
+- **Scraper** (`1d11cf3`, deployed): campaign compute, internal routes, and the
+  R2 publisher wired into the scrape cycle.
+- **R2**: private bucket `web-boost-campaigns`, written by a token scoped to
+  that bucket alone. Artifact verified directly against the S3 endpoint:
+  `campaign/lup-700-brent.json` → HTTP 200 with the contract.
+- **Pages** (`449c7d1`, deployed): the campaign card and the Function serving the
+  artifact with `public, max-age=20, stale-while-revalidate=120,
+  stale-if-error=86400`, an ETag, and no `s-maxage`.
+
+Live checks (2026-11-20):
+
+- `GET /api/v1/campaigns` → `lup-700-brent`, state `active`.
+- `GET /api/v1/campaigns/lup-700-brent` → full contract (goal $2,000 / 3,397,893
+  sats at 58,860 USD/BTC, 52 days left, rate source mempool.space).
+- `GET /api/campaign/lup-700-brent` → 200, `application/json`, ETag, correct
+  `Cache-Control`, no `s-maxage`.
+- Unknown slug → **503** with `no-store` and `Retry-After` (kill switch works).
+- `/api/config` exposes the campaign with `podcastSlugs: ["lup"]`, so the card
+  scopes to LUP only.
+
+### Bugs caught during the deploy
+
+1. **HEAD fell through to the SPA handler.** `curl -I` on the artifact path
+   answered `200 text/html` because the Function only exported `onRequestGet`;
+   HEAD matched the static handler instead. A monitoring probe would have called
+   the endpoint healthy while it served the app shell — and for a *missing*
+   artifact it would have hidden the 503. Both verbs now share one builder.
+   This also fooled the first verification pass: the check that "failed" was my
+   own `-I`, not the endpoint.
+2. **The deploy summary logged only `MEMBER_BOOSTS`** while the generated config
+   carried both bindings. Under-reporting logs are exactly how the missing
+   binding hid the first time; the summary now lists every binding.
+3. **Shared R2 secrets were world-readable** (`0644`) beside macaroons already at
+   `0440`. Tightened to `0440 lnd:lnd`; the service runs as `lnd` and reads them
+   fine.
+
+### Deliberately not done
+
+- `raised` is `$0.00` — a valid payload with no tagged boosts yet. The card
+  renders `$2,000 to go`. Worth a product look: a zero-state meter is honest but
+  unexciting; hiding it until the first contribution is a one-line policy change.
+- Not yet verified in a real browser (no browser tool in this session), nor with
+  a live tagged boost. Both are on the post-launch list.
