@@ -36,14 +36,29 @@
 (defn- slurp-env-path [k]
   (some-> (System/getenv k) not-empty slurp str/trim not-empty))
 
+(defn- resolve-config
+  "Pure precedence: campaign-scoped credentials win, the shared R2 conventions
+   are the fallback. `get-env` returns a string or nil; `read-path` returns a
+   file's trimmed contents or nil. Kept pure so the precedence is testable
+   without mutating the process environment."
+  [get-env read-path]
+  (let [first-of (fn [& ks] (some #(not-empty (get-env %)) ks))]
+    {:bucket     (first-of "R2_CAMPAIGN_BUCKET")
+     :account-id (first-of "R2_CAMPAIGN_ACCOUNT_ID" "R2_ACCOUNT_ID")
+     :access-key (or (read-path "R2_CAMPAIGN_ACCESS_KEY_ID_PATH")
+                     (read-path "R2_ACCESS_KEY_ID_PATH"))
+     :secret-key (or (read-path "R2_CAMPAIGN_SECRET_ACCESS_KEY_PATH")
+                     (read-path "R2_SECRET_ACCESS_KEY_PATH"))}))
+
 (defn- env-config
-  "Resolve publish config from the environment, following the repo's existing R2
-   conventions (credential paths + account id) with a campaign-specific bucket."
+  "Resolve publish config from the environment.
+
+   The preferred shape is a token scoped to the campaign bucket ALONE: the
+   member-boost reader does not need write access to anything, and the campaign
+   publisher does not need read access to member records. The shared R2 token
+   stays as a fallback only."
   []
-  {:bucket     (not-empty (System/getenv "R2_CAMPAIGN_BUCKET"))
-   :account-id (not-empty (System/getenv "R2_ACCOUNT_ID"))
-   :access-key (slurp-env-path "R2_ACCESS_KEY_ID_PATH")
-   :secret-key (slurp-env-path "R2_SECRET_ACCESS_KEY_PATH")})
+  (resolve-config #(System/getenv %) slurp-env-path))
 
 (defn- config-ready?
   [{:keys [bucket account-id access-key secret-key]}]

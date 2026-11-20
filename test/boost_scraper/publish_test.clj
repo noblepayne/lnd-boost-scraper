@@ -179,3 +179,37 @@
         (is (= [] r2))
         (is (= 0 @puts))
         (is (= 1 (count @logs)) "unset config is reported once")))))
+
+(deftest test-resolve-config-precedence
+  (let [env {"R2_CAMPAIGN_BUCKET" "web-boost-campaigns"
+             "R2_ACCOUNT_ID" "acct"
+             "R2_CAMPAIGN_ACCESS_KEY_ID_PATH" "/camp/key"
+             "R2_CAMPAIGN_SECRET_ACCESS_KEY_PATH" "/camp/secret"
+             "R2_ACCESS_KEY_ID_PATH" "/shared/key"
+             "R2_SECRET_ACCESS_KEY_PATH" "/shared/secret"}
+        ;; read-path takes the ENV VAR NAME (it resolves the file itself),
+        ;; not the path — same contract as the production reader.
+        contents {"R2_CAMPAIGN_ACCESS_KEY_ID_PATH" "camp-key"
+                  "R2_CAMPAIGN_SECRET_ACCESS_KEY_PATH" "camp-secret"
+                  "R2_ACCESS_KEY_ID_PATH" "shared-key"
+                  "R2_SECRET_ACCESS_KEY_PATH" "shared-secret"}
+        get-env #(get env %) read-path #(get contents %)]
+    (testing "campaign-scoped credentials win"
+      (let [cfg (#'publish/resolve-config get-env read-path)]
+        (is (= "web-boost-campaigns" (:bucket cfg)))
+        (is (= "acct" (:account-id cfg)))
+        (is (= "camp-key" (:access-key cfg)))
+        (is (= "camp-secret" (:secret-key cfg)))))
+    (testing "the shared token is only a fallback"
+      (let [cfg (#'publish/resolve-config
+                  (fn [k] (when-not (clojure.string/starts-with? k "R2_CAMPAIGN_ACCESS")
+                            (get env k)))
+                  (fn [k] (when-not (clojure.string/starts-with? k "R2_CAMPAIGN_")
+                            (get contents k))))]
+        (is (= "shared-key" (:access-key cfg)))
+        (is (= "shared-secret" (:secret-key cfg)))))
+    (testing "campaign account id overrides the shared one when present"
+      (let [cfg (#'publish/resolve-config
+                  (fn [k] (if (= k "R2_CAMPAIGN_ACCOUNT_ID") "camp-acct" (get env k)))
+                  read-path)]
+        (is (= "camp-acct" (:account-id cfg)))))))

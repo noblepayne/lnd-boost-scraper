@@ -72,6 +72,21 @@ with lib; let
         untouched rather than writing a partial meter).
       '';
     };
+    r2CampaignAccessKeyIdPath = mkOption {
+      type = types.str;
+      default = "";
+      description = ''
+        Path to an R2 access key scoped to the campaign bucket ALONE. Falls back
+        to r2AccessKeyIdPath when empty, but the narrow token is preferred: the
+        member-boost reader needs no write access, and the publisher needs no
+        access to member records.
+      '';
+    };
+    r2CampaignSecretAccessKeyPath = mkOption {
+      type = types.str;
+      default = "";
+      description = "Path to the secret for the campaign-scoped R2 token.";
+    };
     pkg = mkOption {
       type = types.package;
       defaultText = "config.lnd-boost-scraper.pkg";
@@ -132,6 +147,12 @@ in {
         R2_ACCOUNT_ID = cfg.r2AccountId;
         R2_BOOST_BUCKET = cfg.r2BoostBucket;
         R2_CAMPAIGN_BUCKET = cfg.r2CampaignBucket;
+        R2_CAMPAIGN_ACCESS_KEY_ID_PATH =
+          if cfg.r2CampaignAccessKeyIdPath != "" then cfg.r2CampaignAccessKeyIdPath
+          else cfg.r2AccessKeyIdPath;
+        R2_CAMPAIGN_SECRET_ACCESS_KEY_PATH =
+          if cfg.r2CampaignSecretAccessKeyPath != "" then cfg.r2CampaignSecretAccessKeyPath
+          else cfg.r2SecretAccessKeyPath;
       };
     };
   };
