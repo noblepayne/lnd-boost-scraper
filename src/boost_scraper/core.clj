@@ -3,6 +3,7 @@
                        :linters {:unresolved-symbol {:exclude [(datalevin.core/with-conn)]}}}}
   (:gen-class)
   (:require [boost-scraper.db :as db]
+            [boost-scraper.publish :as publish]
             [boost-scraper.reports :as reports]
             [boost-scraper.upstream :as upstream]
             [boost-scraper.upstream.alby :as alby]
@@ -263,13 +264,16 @@
                                                           {:account-id r2-account-id
                                                            :access-key r2-access-key
                                                            :secret-key r2-secret-key
-                                                           :bucket r2-bucket}))))]
-            ;; Wait for all scrapers, logging individual errors.
+                                                           :bucket r2-bucket}))))
+                publish-fut (utils/apply-virtual
+                             (fn [] (publish/publish-campaigns! nodecan-conn)))]
+            ;; Wait for all scrapers and publishers, logging individual errors.
             (doseq [[label timeout-ms f] [["Alby"    600000 alby-fut]
                                           ["JB"      600000 lnd-fut]
                                           ["Nodecan" 600000 nodecan-fut]
                                           ["Zaprite" 300000 zaprite-fut]
-                                          ["R2"      300000 r2-fut]]]
+                                          ["R2"      300000 r2-fut]
+                                          ["Campaign publish" 120000 publish-fut]]]
               (when f
                 (try
                   (let [result (deref f timeout-ms ::timeout)]

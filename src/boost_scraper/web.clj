@@ -7,6 +7,8 @@
             [boost-scraper.client-state :as client-state]
             [boost-scraper.analysis :as analysis]
             [boost-scraper.boosties :as boosties]
+            [boost-scraper.campaigns :as campaigns]
+            [boost-scraper.contributions :as contributions]
             [boost-scraper.schema :as db-schema]
             [boost-scraper.feed :as feed]
             [boost-scraper.query-proxy :as qp]
@@ -17,6 +19,7 @@
             [clojure.math :as math]
             [clojure.string :as str]
             [cybermonday.core :as markdown]
+            [datalevin.core :as d]
             [dev.onionpancakes.chassis.core :as html]
             [manifold.deferred :as mf]
             [muuntaja.core :as m]
@@ -179,7 +182,8 @@
                                            :margin-right "50px"}}
                       (markdown/parse-body report)]]))]]]]]])}))))
 
-(declare handle-reconcile-preview handle-reconcile-backfill handle-reconcile-resolve)
+(declare handle-reconcile-preview handle-reconcile-backfill handle-reconcile-resolve
+         handle-campaigns-list handle-campaign-detail)
 
 (defn routes [db-conn]
   [["/ping"
@@ -222,6 +226,12 @@
                          {:status 200
                           :headers {"content-type" "application/json"}
                           :body (json/generate-string {:deleted deleted})}))}}]
+   ;; Campaigns — read-only meter surface. The list is an index (slug, title,
+   ;; state); pricing lives on the detail route, which can refuse a rate.
+   ["/api/v1/campaigns"
+    {:get {:handler (handle-campaigns-list db-conn)}}]
+   ["/api/v1/campaigns/:slug"
+    {:get {:handler (handle-campaign-detail db-conn)}}]
    ;; Web-boost orphan reconcile (Phase 3): preview is read-only; backfill is
    ;; write-gated by WEB_BOOST_RECONCILE_WRITE and answers 403 otherwise.
    ["/api/v1/reconcile/preview"
@@ -603,6 +613,81 @@
           (catch Exception e
             (reconcile-json 500 {:error (str "resolve: " (.getMessage e))})))
         (reconcile-json 400 {:error "ZAPRITE_API_KEY_PATH not set or unreadable"})))))
+
+;; ---------------------------------------------------------------------------
+;; Campaigns — read-only internal surface over `campaigns/progress`.
+;;
+;; The list carries NO money: it is an index, and it has no rate dependency.
+;; The detail route is the one that prices a campaign, and pricing can refuse.
+;; ---------------------------------------------------------------------------
+
+(defn epoch-now
+  "Request-time clock in epoch seconds. A var so route tests can freeze it."
+  []
+  (quot (System/currentTimeMillis) 1000))
+
+(defn campaign-state
+  "Where a campaign is relative to `now`, from its window alone.
+
+   Windows are inclusive of `:opens` and exclusive of `:closes` (campaigns.edn),
+   so at the closing second a campaign is already :closed."
+  [campaign now]
+  (let [{:keys [opens closes]} (:campaign/window campaign)
+        now (long now)]
+    (cond
+      (< now (long opens)) :scheduled
+      (>= now (long closes)) :closed
+      :else :active)))
+
+(defn- campaigns-list-body
+  "slug + title + state, nothing else. A list must never imply a total."
+  [now]
+  {:campaigns (mapv (fn [c] {:slug (:campaign/slug c)
+                             :title (:campaign/title c)
+                             :state (campaign-state c now)})
+                    (campaigns/campaigns))})
+
+(defn- campaign-detail-body
+  "The published contract plus `recent`. No rate ⇒ no payload at all.
+
+   `recent` comes from `campaigns/recent` — the single home for that projection,
+   shared with the publisher, so the list can never disagree with `raised`."
+  [conn campaign now]
+  (let [p (campaigns/progress conn campaign now)]
+    (case (:status p)
+      :not-found {:status :not-found}
+      :no-rate {:status :no-rate}
+      {:status :ok
+       :body (assoc p :recent (campaigns/recent conn campaign (:rate p)))})))
+
+(defn handle-campaigns-list
+  "GET /api/v1/campaigns — index only: slug, title, state. Read-only."
+  [_db-conn]
+  (fn [_request]
+    (reconcile-json 200 (campaigns-list-body (epoch-now)))))
+
+(defn handle-campaign-detail
+  "GET /api/v1/campaigns/:slug — the published contract plus `recent`.
+
+   404 unknown slug; 503 when the price feed has neither a fresh nor a stale
+   rate. The 503 body carries no numbers: a meter with an invented rate is worse
+   than no meter."
+  [db-conn]
+  (fn [request]
+    (let [slug (get-in request [:path-params :slug])
+          campaign (campaigns/find-campaign slug)]
+      (if-not campaign
+        (reconcile-json 404 {:error (str "unknown campaign: " slug)})
+        (let [{:keys [status body]}
+              (campaign-detail-body db-conn campaign (epoch-now))]
+          (case status
+            :ok (reconcile-json 200 body)
+            :no-rate (reconcile-json 503
+                                     {:error (str "BTC/USD rate unavailable; "
+                                                  "refusing to publish a meter "
+                                                  "with an invented rate")
+                                      :status "no-rate"})
+            (reconcile-json 404 {:error (str "unknown campaign: " slug)})))))))
 
 (defn make-virtual
   "Like utils/make-virtual but returns a Manifold deferred instead

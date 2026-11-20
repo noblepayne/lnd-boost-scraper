@@ -308,3 +308,21 @@
                :counted (counted-contributions conn campaign)})
        {:status :no-rate})
      {:status :not-found})))
+
+(defn recent
+  "Newest-first list of counted contributions for a campaign, capped at `n`.
+   THIS IS THE ONE HOME for this projection — the HTTP route and the publisher
+   both call it, so the published `recent` can never disagree with `raised`."
+  ([conn campaign rate] (recent conn campaign rate 20))
+  ([conn campaign rate n]
+   (let [usd (fn [c] (usd-value (:contribution/sats c)
+                                (:contribution/fiat-cents c)
+                                (:btc_usd rate)))]
+     (->> (counted-contributions conn campaign)
+          (sort-by :contribution/occurred-at #(compare %2 %1))
+          (take n)
+          (mapv (fn [c]
+                  {:sats (long (or (:contribution/sats c) 0))
+                   :usd (round-to (usd c) 2)
+                   :sender (or (:contribution/handle c) "anonymous")
+                   :at (:contribution/occurred-at c)}))))))
