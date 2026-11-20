@@ -65,8 +65,7 @@
         username (get meta :username)
         podcast-name (get meta :podcastName)
         episode-title (get meta :episodeTitle)
-        message (get meta :message)
-        campaign (get meta :campaign)]
+        message (get meta :message)]
     (cond-> {:boostagram/zaprite_order_id (get order :id)
              :invoice/identifier (str "zaprite-" (get order :id))
              :boostagram/podcast podcast-name
@@ -83,10 +82,6 @@
              :boostagram/received_at paid-date
              :boostagram/podcast_slug (get meta :slug (get meta :podcastSlug))
              :boostagram/episode_guid (get meta :episodeGuid)
-             ;; Campaign attribution (docs/campaign-goal-spec.md): the web-boost
-             ;; form sends metadata.campaign when the listener picks a campaign.
-             ;; Absent for ordinary boosts — that is the normal case.
-             :boostagram/campaign campaign
              :boostagram/memberful_member_id (some-> (get meta :memberId) str)}
       (= "BTC" currency)
       (assoc :boostagram/type :sat

@@ -54,7 +54,6 @@
    :boostagram/episode_guid {:db/valueType :db.type/string}
 
    :boostagram/type {:db/valueType :db.type/keyword}
-   :boostagram/campaign {:db/valueType :db.type/string}
    :boostagram/boost_id {:db/valueType :db.type/string}
    ;; Sync cursor tracking
    :sync-cursor/key {:db/valueType :db.type/string

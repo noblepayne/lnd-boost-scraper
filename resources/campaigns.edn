@@ -9,6 +9,11 @@
 ;;  - The target is canonical in USD CENTS. The flight costs dollars; sats are
 ;;    derived at snapshot time and labelled, so a BTC move cannot silently
 ;;    move the goal.
+;;  - Attribution is ONE thing: a tag in the boost message. The web-boost form
+;;    offers a picker, but its only job is appending that tag — the same string
+;;    a listener could type in any podcast app. No second field and no matcher
+;;    language: a boost belongs here when its message contains :campaign/tag,
+;;    or when it lands on :campaign/also-episode.
 ;;  - Publishing is a static JSON artifact (never the scraper itself).
 ;;
 ;; All times are epoch seconds. Windows are inclusive of :opens, exclusive of
@@ -38,14 +43,14 @@
                                               ; so a holiday slip doesn't cut it off
                      :closes-note "Expected LUP 700: Sunday 2027-01-03"}
 
-   ;; A boost counts if any of these match. Order is preference, not priority:
-   ;; 1. the web-boost form attributed it (a dropdown — exact, untypable),
-   ;; 2. the message carries the tag (works from any podcast app),
-   ;; 3. it lands on the finale episode (carries 700 without extra effort).
-   :campaign/matcher
-   {:any-of [{:type :campaign :value "lup-700-brent"}
-             {:type :message :regex "(?i)#\\s*700\\s*club"}
-             {:type :episode :show "lup" :episode "700"}]}
+   ;; Membership is two concrete facts, not a matcher language:
+   ;;   - the message contains the tag (works from any podcast app; the
+   ;;     web-boost picker simply types it for the listener), OR
+   ;;   - the boost lands on the finale episode.
+   ;; Tags are multi-valued, so simultaneous campaigns compose for free — a
+   ;; boost can carry #700club and another campaign's tag at once.
+   :campaign/tag "#700club"
+   :campaign/also-episode "700"
 
    ;; --- money ---
    ;; $2,000 rather than today's ~$1.2-1.5k fare quote: fares move before we can
