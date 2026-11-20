@@ -194,7 +194,7 @@
           (let [resp (fetch "lup-700-brent" at)]
             (is (= 200 (:status resp)))
             (let [body (json/parse-string (:body resp) true)]
-              (is (= #{:slug :title :subtitle :tag :goal :raised :split :remaining_usd
+              (is (= #{:slug :title :subtitle :tag :stretch :goal :raised :split :remaining_usd
                        :percent :days_left :opens_at :closes_at :generated_at
                        :rate :cta :recent}
                      (set (keys body))))

@@ -67,6 +67,12 @@
                      :count-member-free? false ; presence, not value
                      :exclude-self? true}     ; chrislas / noblepayne
 
+   ;; --- over-goal ---
+   ;; Shown only once the goal is met. The flight is the flight; this is what
+   ;; the extra buys, in one line. Data, not code, so it can be rewritten
+   ;; without touching the card.
+   :campaign/stretch "Every dollar past the goal buys a better chair."
+
    ;; --- call to action on the public page ---
    :campaign/cta {:label "Boost with #700club"
                   :url "https://boost.jupiterbroadcasting.com/"

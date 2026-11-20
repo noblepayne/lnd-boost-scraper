@@ -94,7 +94,7 @@
       (is (= "test-camp" (:slug (first @puts))))
       (is (= [{:slug "test-camp" :result :published}] result)))
     (testing "contract keys are present with recent"
-      (is (= #{:slug :title :subtitle :tag :goal :raised :split :remaining_usd
+      (is (= #{:slug :title :subtitle :tag :stretch :goal :raised :split :remaining_usd
                :percent :days_left :opens_at :closes_at :generated_at :rate :cta :recent}
              (set (keys payload))))
       (is (= "test-camp" (:slug payload)))

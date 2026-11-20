@@ -236,6 +236,7 @@ invented rate is worse than no meter.
   "title": "Get Brent in the Studio for LUP 700",
   "subtitle": "Studio time, travel, and a decent chair.",
   "tag": "#700club",
+  "stretch": "Every dollar past the goal buys a better chair.",
   "goal": { "usd": 2000.0, "sats": 3386903 },
   "raised": { "usd": 2.87, "sats": 1477, "contributions": 3, "people": 2, "anonymous": 0 },
   "split": {
@@ -265,6 +266,9 @@ What the numbers mean:
   expressed in sats. Once fiat is in the mix, `raised.sats` against `goal.sats`
   is not a fraction: a $2.00 boost adds dollars and zero sats. Use `raised.usd`
   against `goal.usd`, or use `split`.
+- `stretch` is one line of over-goal copy from the campaign config. It is
+  published whether or not the goal is met, so changing the joke never needs a
+  frontend deploy; render it only when `raised.usd > goal.usd`. Empty when unset.
 - `split` says how the money actually arrived, rail by rail. It reconciles
   exactly: `split.sats.usd + split.fiat.usd == raised.usd`, to the cent, because
   each part is rounded before they are summed. This is the object to report on.

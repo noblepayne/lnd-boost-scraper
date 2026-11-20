@@ -240,6 +240,9 @@
      ;; the card renders one line less.
      :subtitle (or (:campaign/subtitle campaign) "")
      :tag (:campaign/tag campaign)
+     ;; Rendered only when the goal is met; published always so the card never
+     ;; has to be redeployed to change one line of copy.
+     :stretch (or (:campaign/stretch campaign) "")
      :goal {:usd (round-to goal-usd 2)
             :sats (sats-value goal-cents btc-usd)}
      :raised {:usd raised-usd
