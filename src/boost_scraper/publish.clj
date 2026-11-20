@@ -112,6 +112,46 @@
 ;; private helpers.
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Publish receipt — one line per successful publish.
+;;
+;; Without it, "is it publishing?" can only be answered by fetching from R2:
+;; success was silent while every failure path logged, so a working publisher
+;; and a stopped one looked equally quiet in the journal.
+;; ---------------------------------------------------------------------------
+
+(defn- rate-source-label
+  "The rate source as display text. Tolerates keywords, strings, anything."
+  [source]
+  (cond
+    (nil? source) nil
+    (keyword? source) (name source)
+    :else (str source)))
+
+(defn- usd-text
+  "Two-decimal USD, locale-free so the line reads the same on any box."
+  [usd]
+  (-> (java.math.BigDecimal/valueOf (double usd))
+      (.setScale 2 java.math.RoundingMode/HALF_UP)
+      (.toPlainString)))
+
+(defn publish-summary
+  "One line describing a published artifact: what amount, how many, at what rate.
+
+   Total on purpose. A missing key must degrade the line, never throw — logging
+   is not allowed to become a new way for a publish to fail."
+  [slug progress]
+  (let [raised (or (:raised progress) {})
+        rate (or (:rate progress) {})
+        btc-usd (:btc_usd rate)]
+    (str "Campaign published " slug ": $"
+         (usd-text (or (:usd raised) 0.0))
+         " raised (" (or (:sats raised) 0) " sats, "
+         (or (:contributions raised) 0) " contributions)"
+         (when btc-usd (str ", rate " (long btc-usd) " USD/BTC"))
+         (when-let [source (rate-source-label (:source rate))]
+           (str " (" source ")")))))
+
 (defn- publish-one!
   "Compute and publish a single campaign. Returns a result map describing what
    happened; never throws."
@@ -136,7 +176,9 @@
                 put-result (try (put-fn slug body) (catch Throwable t {:publish/error t}))]
             (cond
               (= :ok put-result)
-              {:slug slug :result :published}
+              (do
+                (log-fn (publish-summary slug progress))
+                {:slug slug :result :published})
 
               (= ::timeout put-result)
               (do (log-fn (str "Campaign publish timed out after " put-timeout-ms "ms: " slug))

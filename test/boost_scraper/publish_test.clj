@@ -213,3 +213,36 @@
                   (fn [k] (if (= k "R2_CAMPAIGN_ACCOUNT_ID") "camp-acct" (get env k)))
                   read-path)]
         (is (= "camp-acct" (:account-id cfg)))))))
+
+(deftest test-successful-publish-emits-a-receipt-line
+  (insert! (boost {:sender "alice" :sats 1000 :msg "#700club" :iid "ok-1"}))
+  (let [logs (atom [])
+        puts (atom [])
+        result (publish/publish-campaigns! *conn*
+                                           {:now NOW
+                                            :config {:bucket "b" :account-id "a" :access-key "k" :secret-key "s"}
+                                            :put-fn (fn [slug body] (swap! puts conj {:slug slug :body body}) :ok)
+                                            :campaigns [test-campaign]
+                                            :log-fn #(swap! logs conj %)})]
+    (is (= [{:slug "test-camp" :result :published}] result))
+    (is (= 1 (count @logs)) "success is no longer silent")
+    (let [line (first @logs)
+          payload (json/parse-string (:body (first @puts)) true)]
+      (testing "the receipt names the campaign and agrees with the artifact it wrote"
+        (is (re-find #"Campaign published test-camp" line))
+        (is (re-find (re-pattern (str (get-in payload [:raised :sats]) " sats")) line))
+        (is (re-find (re-pattern (str (get-in payload [:raised :contributions]) " contributions")) line))
+        (is (re-find #"\$[0-9]+\.[0-9]{2} raised" line))
+        (is (re-find #"USD/BTC" line))))))
+
+(deftest test-publish-summary-cannot-fail-a-publish
+  (testing "missing progress keys degrade the line instead of throwing"
+    (is (string? (publish/publish-summary "x" {})))
+    (is (string? (publish/publish-summary "x" {:raised nil :rate nil})))
+    (is (re-find #"\$0\.00" (publish/publish-summary "x" {})))
+    (is (re-find #"0 contributions" (publish/publish-summary "x" {}))))
+  (testing "a rate source renders without keyword punctuation"
+    (is (re-find #"\(mempool\.space\)"
+                 (publish/publish-summary
+                  "x" {:raised {:usd 0.87 :sats 1477 :contributions 2}
+                       :rate {:btc_usd 59051 :source :mempool.space}})))))
