@@ -191,29 +191,81 @@ carries `?campaign=` on purpose — that link is the campaign's front door.)
 
 ### W7 — operations and rollout (driver + Wes)
 
-Nothing here is code; it is the path to a number on a screen.
+Nothing here is product code; it is the path to a number on a screen.
 
-1. **Create the R2 bucket** (private) and confirm the deploy account can write
-   it. Set `R2_CAMPAIGN_BUCKET` on the scraper box; confirm the existing R2
-   credential variables are readable by the service.
-2. **Deploy the scraper** (batches A+B: compute, routes, publisher). Verify:
-   - `GET /api/v1/campaigns` lists `lup-700-brent` with state `active`;
-   - `GET /api/v1/campaigns/lup-700-brent` returns the contract (or a clean 503
-     if the price feed is down — never partial numbers);
-   - the publisher's first artifact lands in `campaign/lup-700-brent.json`.
-3. **Bind and deploy web-boost** (Cloudflare Pages): `CAMPAIGN_BUCKET` binding to
-   the real bucket, then `nix develop -c npm run pages:deploy:production`.
-4. **Verify production:**
-   - `curl https://boost.jupiterbroadcasting.com/api/campaign/lup-700-brent`
-     returns the artifact with the agreed `Cache-Control` and no `s-maxage`;
-   - the card renders on the page for LUP and is **absent** for other shows;
-   - `?campaign=lup-700-brent` preselects the picker; `?campaign=nope` does not;
-   - a boost through the form arrives in the scraper with `#700club` appended to
-     the message and appears in the meter within one publish cycle.
-5. **Send the funding snippet** to the JB feed host (external dependency, not our
-   repo).
-6. **Kill-switch drill:** point the function at a missing object and confirm the
+**W7.0 — the binding trap (found while reading the Pages docs; ALREADY FIXED)**
+
+`web-boost/scripts/pages-deploy-production.mjs` *generates* its own
+`wrangler.toml` for the deploy and originally emitted only the `MEMBER_BOOSTS`
+R2 binding. The `CAMPAIGN_BUCKET` binding in the repo's `wrangler.toml` is used
+by `wrangler pages dev` locally but is **ignored by the production deploy** — the
+function would have seen `env.CAMPAIGN_BUCKET` undefined and returned 503
+forever, with a green build and no error anywhere. Fixed in `5f258c8`; the
+bucket name is overridable with `WEB_BOOST_CAMPAIGN_BUCKET`.
+**Verify the generated config really contains both bindings on the first deploy.**
+
+**W7.1 — create the bucket and give the scraper write access**
+
+```bash
+# private bucket; no public access, no custom domain
+wrangler r2 bucket create web-boost-campaigns
+wrangler r2 bucket list                     # confirm it exists
+```
+
+Then create an **R2 API token** (dashboard → R2 → API → Manage API tokens) with
+*Object Read & Write* scoped to this one bucket. The scraper's S3 client needs:
+
+- account id (existing `R2_ACCOUNT_ID`)
+- access key id + secret (`R2_ACCESS_KEY_ID_PATH` / `R2_SECRET_ACCESS_KEY_PATH`
+  already exist as file paths on the box)
+- `R2_CAMPAIGN_BUCKET=web-boost-campaigns` ← new
+- endpoint is `https://<account-id>.r2.cloudflarestorage.com` (the existing R2
+  client already points there)
+
+Reusing the existing credential variables is deliberate: one credential path,
+not a second parallel one.
+
+**W7.2 — deploy the scraper and verify the three surfaces**
+
+```bash
+ssh nodecan 'cd /etc/nixos && sudo nix flake lock --update-input lnd-boost-scraper && sudo nixos-rebuild switch'
+```
+
+Verify, in order:
+
+1. `GET /api/v1/campaigns` → `lup-700-brent`, state `active`.
+2. `GET /api/v1/campaigns/lup-700-brent` → the contract, or a clean **503**
+   `no-rate` (never a partial payload). If it 503s, the price feed is unhappy —
+   check the feed before wondering about the meter.
+3. After one publish cycle: `wrangler r2 object get
+   web-boost-campaigns/campaign/lup-700-brent.json --pipe | head` returns JSON
+   with `generated_at` and a `rate` block.
+
+**W7.3 — deploy Pages**
+
+```bash
+cd web-boost && nix develop -c npm run pages:deploy:production
+```
+
+Requires the Cloudflare production token the deploy script expects. Watch the
+generated config: it must contain **both** `MEMBER_BOOSTS` and `CAMPAIGN_BUCKET`.
+
+**W7.4 — verify production end to end**
+
+1. `curl -sI https://boost.jupiterbroadcasting.com/api/campaign/lup-700-brent`
+   → 200, the agreed `Cache-Control`, an `ETag`, and **no `s-maxage`**.
+2. The card renders on the page for LUP; select another show → card disappears.
+3. `?campaign=lup-700-brent` preselects the picker; `?campaign=nope` does not.
+4. Send a real boost through the form: the scraper stores `#700club` in the
+   message, and the number moves within one publish cycle (~1 min).
+5. **Kill-switch drill:** request a slug that has no artifact → 503, and the
    card hides rather than showing `$0`.
+
+**W7.5 — the feed link (external)**
+
+Send the JB feed host the `<podcast:funding>` snippet from W6. It is an addition,
+not a replacement: the feed already carries one Memberful funding tag and the
+spec allows multiples.
 
 ### Order of work and who does what
 
