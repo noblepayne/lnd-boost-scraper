@@ -1,6 +1,8 @@
 # Work Order — LUP 700 Campaign Meter
 
-Status: **awaiting review — do not dispatch until Wes passes this.**
+Status: **W1-W4 complete and green; W5-W7 remaining.**
+Batches A and B are committed (scraper 174 tests / 964 assertions; web-boost
+113 tests). Nothing is deployed yet.
 Date: 2026-11-20. Owner: driver session. Repos: `lnd-boost-scraper`, `web-boost`.
 
 ## Objective
@@ -101,55 +103,150 @@ Files: `functions/api/campaign/[slug].json.ts`, `wrangler.toml` binding.
 - Acceptance: 503 with no object; 200 + exact headers with object; unknown slug
   ⇒ 503 as well (no enumeration signal).
 
-### W5 — the card (web-boost)
-Files: `src/main.ts` (+ styles), test for the pure render function.
-- One card above the episode picker, matching existing tokens (near-black,
-  1px border, mono orange eyebrow, pill radius).
-- Layout: eyebrow `#700club · LUP 700` → title → one-line subtitle →
-  `$1,240` (44px tabular) `of $2,000` muted · `$760 to go` right →
-  8px bar (orange fill, no stripes/gradients) → `128 boosters · 19 days left`.
-- Behaviour: skeleton → fetch → render. **Never render 0.** Stale >5 min →
-  amber "delayed"; fetch failure and stale >30 min → hide the card. Count-up
-  once on first paint (≤800ms), one 400ms fill transition on a real change, all
-  gated on `prefers-reduced-motion`. `<progress>` + `aria-valuetext`.
-- Over 100%: clamp fill, honest text, `· goal met`, never re-goal.
-- Acceptance: pure render fn unit tests (payload → expected text/attrs;
-  missing payload → hidden, never "0"); a11y attributes asserted.
+### W5 — the card on the page (web-boost)
 
-### W6 — docs (driver, after code lands)
-`API.md` (new endpoints), `docs/campaign-goal-spec.md` §4.2/§6, dev-log entry,
-and the feed snippet for the JB feed host:
+Files: `src/main.ts` (+ styles), a pure render module + its tests.
+Status: **not started.** The HTML preview at
+`web-boost/docs/mockups/campaign-card.html` is the visual specification.
+
+**Markup and layout** (inherit the page's existing tokens — near-black card,
+1px border, mono uppercase eyebrow, pill radius, `--jb-*` colours):
+
+1. eyebrow: tag pill `#700club` + `LUP 700`
+2. title (`h2`, ~1.9rem): from payload `title`
+3. one-line subtitle from `subtitle`
+4. numbers row: `$1,240` (~44px, tabular-nums) · `of $2,000` muted ·
+   `$760 to go` right-aligned in gold
+5. bar: 8px, pill radius, **solid `--jb-orange` fill** (no gradient, no stripes),
+   track `rgba(255,255,255,.08)` + 1px inset ring
+6. footer (13px, quiet): `128 boosters · 19 days left · USD valued at time of boost`
+
+**Placement:** one card, directly above the boost form's first section, and only
+when the selected podcast has an active campaign. It never appears twice.
+
+**Data:** `GET /api/campaign/<slug>` (the artifact). The card never computes a
+number — `raised.usd`, `remaining_usd`, `percent`, `days_left` are read as-is.
+
+**Failure and staleness rules** (these are the contract, not polish):
+
+- Skeleton while loading. **Never render `0`.** `$0` is legal only from a parsed
+  payload with a valid `generated_at`.
+- Payload age > 5 min → append an amber `delayed` note; keep showing the last
+  known number.
+- Fetch failure or age > 30 min → **hide the card** entirely.
+- `503` from the endpoint is a normal state, not an error: hide the card.
+
+**Over 100%:** clamp the fill at 100%, keep the text honest (`$2,410 of $2,000`),
+replace `$X to go` with `goal met`, shift the fill to gold. **Never** reset to a
+new smaller goal.
+
+**Motion:** one count-up on first paint (≤800ms), one 400ms width transition on a
+real change. Nothing loops. All gated behind `prefers-reduced-motion:
+no-preference`. The final number is present in the DOM without JS.
+
+**Accessibility:** `<progress>` (or `role="progressbar"` with min/max/now) plus
+`aria-valuetext="$1,240 of $2,000 raised, $760 to go"`. Fill vs track ≥3:1, text
+≥4.5:1, and "goal met" must not be signalled by colour alone.
+
+**Campaign picker preselection — `?campaign=<slug>` (decided 2026-11-20):**
+
+- The picker **defaults to "No campaign"**. It is never preselected by default:
+  the campaign is a lens on ordinary support, so defaulting would silently
+  attribute normal boosts to the trip and make the total a lie.
+- A `?campaign=<slug>` URL parameter preselects it **when that campaign is active
+  for the currently selected podcast**. Intent follows the link, not the page.
+- Invalid, unknown, or closed campaign in the URL → **ignore silently** and leave
+  "No campaign". A stale tweet must not break the form.
+- Changing the podcast re-evaluates: keep the preselection only if that show runs
+  that campaign.
+- **No localStorage.** A remembered choice would keep tagging boosts to a
+  campaign that has since closed.
+- Links that must carry the parameter: the meter card's own CTA, the
+  `<podcast:funding>` URL, show notes, and any on-air link.
+
+**Tests (pure render + param parsing; no network):**
+
+- payload → expected numbers, bar width, and `aria-valuetext`;
+- missing/garbage payload → hidden, and specifically **not** `0`;
+- age > 5 min → `delayed` note present, number unchanged;
+- age > 30 min or 503 → hidden;
+- over-goal payload → fill clamped, `goal met` shown, no new goal;
+- `?campaign=` valid for the show → preselected; for another show → not;
+  unknown/closed → not;
+- reduced-motion preference suppresses count-up and transition.
+
+### W6 — documentation (driver, after code lands)
+
+`API.md` (the campaign endpoints and the artifact contract),
+`docs/campaign-goal-spec.md` §4.2/§6, and a dev-log entry. Also hand the feed
+host the funding snippet:
 
 ```xml
-<podcast:funding url="https://boost.jupiterbroadcasting.com/#700club">Help get Brent to the studio for LUP 700</podcast:funding>
+<podcast:funding url="https://boost.jupiterbroadcasting.com/?campaign=lup-700-brent">Help get Brent to the studio for LUP 700</podcast:funding>
 ```
-(spec: `<podcast:funding>` is *Count: Multiple*; node value ≤128 chars; LUP
-already carries one Memberful funding tag, so this is an addition, not a swap.
-Points at the main page anchor for now — a dedicated campaign page is a later
-option, and the URL can move then.)
 
-## Dependency graph / dispatch plan
+(`<podcast:funding>` is *Count: Multiple*; node value ≤128 chars; LUP already
+carries a Memberful funding tag, so this is an addition, not a swap. The URL
+carries `?campaign=` on purpose — that link is the campaign's front door.)
+
+### W7 — operations and rollout (driver + Wes)
+
+Nothing here is code; it is the path to a number on a screen.
+
+1. **Create the R2 bucket** (private) and confirm the deploy account can write
+   it. Set `R2_CAMPAIGN_BUCKET` on the scraper box; confirm the existing R2
+   credential variables are readable by the service.
+2. **Deploy the scraper** (batches A+B: compute, routes, publisher). Verify:
+   - `GET /api/v1/campaigns` lists `lup-700-brent` with state `active`;
+   - `GET /api/v1/campaigns/lup-700-brent` returns the contract (or a clean 503
+     if the price feed is down — never partial numbers);
+   - the publisher's first artifact lands in `campaign/lup-700-brent.json`.
+3. **Bind and deploy web-boost** (Cloudflare Pages): `CAMPAIGN_BUCKET` binding to
+   the real bucket, then `nix develop -c npm run pages:deploy:production`.
+4. **Verify production:**
+   - `curl https://boost.jupiterbroadcasting.com/api/campaign/lup-700-brent`
+     returns the artifact with the agreed `Cache-Control` and no `s-maxage`;
+   - the card renders on the page for LUP and is **absent** for other shows;
+   - `?campaign=lup-700-brent` preselects the picker; `?campaign=nope` does not;
+   - a boost through the form arrives in the scraper with `#700club` appended to
+     the message and appears in the meter within one publish cycle.
+5. **Send the funding snippet** to the JB feed host (external dependency, not our
+   repo).
+6. **Kill-switch drill:** point the function at a missing object and confirm the
+   card hides rather than showing `$0`.
+
+### Order of work and who does what
 
 ```
-driver: freeze contract + rate in campaigns.edn
-   ├── Batch A (parallel): W1 (compute) · W4 (function) · W5 (card)
-   ├── Batch B:            W2 (routes) · W3 (publish)      ← need W1's shape
-   └── Batch C (driver):   W6 docs + integration verify + commit
+W5 card (worker)            → driver: suites + review + commit
+W7.1 bucket/creds (Wes)     → W7.2 scraper deploy (driver)
+W7.3 pages deploy (Wes+driver) → W7.4 production verify (driver)
+W6 docs (driver)            → W7.5 funding snippet to feed host (Wes)
 ```
+
+W5 and W7.1 are independent: the bucket can be created while the card is being
+built. Production verification needs both.
+
+## Dispatch rules (still in force for W5)
 
 Workers never commit, never run the suite, never delete (contractor §3).
-Driver runs tests serially and commits. Reviews use a different model than the
-editor (§3.4). Model IDs chosen at dispatch time from the roster.
+The driver runs the suites serially, reviews, and commits; reviews use a
+different model than the editor (§3.4); one writer per working tree (§3.2 —
+use a git worktree when two workers need the same repo).
 
 ## Verification before this is called done
 
-1. `clojure -M:test` green (all suites, driver-run).
+Code gates (driver):
+
+1. `clojure -M:test` green.
 2. `web-boost`: `npm test` + `tsc --noEmit` green.
-3. Golden number: with today's data the contract's `raised.usd` equals an
-   independently hand-computed value for the same window; `remaining_usd`
-   equals `goal.usd - raised.usd`.
-4. Function returns 503 when the artifact is absent (kill switch proof).
-5. Card renders hidden, not zero, when the fetch fails.
+3. Golden number: the contract's `raised.usd` equals an independently
+   hand-computed value for the same window; `remaining_usd` equals
+   `goal.usd - raised.usd`.
+4. The function returns 503 when the artifact is absent.
+5. The card renders hidden, never `0`, when the fetch fails.
+
+Production gates: see W7.4.
 
 ## Risks
 
