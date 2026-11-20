@@ -7,6 +7,62 @@ Format: date · decision · why.
 
 ---
 
+## 2026-11-20 · Campaigns simplified: one representation (tag in the message)
+
+### The critique that prompted it
+
+Wes asked the right question — *will this be bloat when we do more of these, or
+is it reusable?* — and floated the alternative: let the web boost just append
+the tag to the message. Reviewed against Hickey (complecting), Normand
+(abstraction with no instances), Wayne (unstated overlap spec), and plain
+senior taste. Verdict: the plumbing was a one-off, the accounting core was not.
+
+### What was wrong
+
+The first cut had **three ways to belong to a campaign** — a
+`metadata.campaign` field, a `#700club` regex, and an episode match — reconciled
+by an `:any-of` matcher AST, and **two registries** (web-boost TS + scraper
+EDN). That is one concept split into three representations, which is precisely
+the failure class behind the feed dedup `""`/`null` bug. The AST was also
+written but never compiled: an abstraction with zero real instances, designed
+for matcher types we do not have.
+
+### What it is now
+
+```
+:campaign/tag          "#700club"
+:campaign/also-episode "700"
+```
+
+```clojure
+(or (message-contains? boost tag)
+    (= episode also-episode))
+```
+
+The web-boost picker survives, but its only job is appending the canonical tag
+server-side (so it cannot be deleted after the fact). It is convenience, not
+mechanism.
+
+**Deleted:** `:boostagram/campaign` (no data was ever written to it), the
+`metadata.campaign` ingestion path, the `:any-of` matcher AST, and the payload
+`campaign` field. **Kept:** the accounting core, config-as-data, the picker.
+
+### Why tags beat a structured field
+
+- **One representation** — nothing to reconcile.
+- **Universal** — works from every podcast app, not just our form.
+- **Multi-valued** — a message can carry two campaign tags, so simultaneous
+  campaigns compose without answering an overlap question.
+- **Self-documenting** — the tag *is* the contract, and it is the string a
+  listener would have typed anyway.
+
+Cost of the pivot was one commit in each repo, because nothing had been built
+on top of the AST and no attribution data existed yet. Doing it after the meter
+shipped would have meant migrating campaign membership.
+
+**Tests:** scraper 146/828, web-boost 109 (tag appended, tag-only when no
+message, no duplicate tag, 300-char bound, unknown/foreign campaign rejected).
+
 ## 2026-11-19 · Campaigns plan locked (five decisions) + schema endpoint shipped
 
 ### Schema endpoint — shipped

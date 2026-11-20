@@ -69,9 +69,11 @@ The scraper carries a query API and reconcile routes. Public meters get a static
 JSON artifact (R2 → static page), never a public tunnel to the app. If live data
 is ever needed, a proxy (showfactory) reads the internal API.
 
-### Campaign rules — AGREED 2026-11-19
-- **Attribution:** `#700club` tag **or** episode 700. Hashtag covers the
-  pre-episode run (694–699); the finale counts by episode.
+### Campaign rules — AGREED 2026-11-19, attribution revised 2026-11-20
+- **Attribution: a tag in the boost message** (`#700club`), plus an optional
+  `:also-episode` for the finale. The web-boost picker appends the tag
+  server-side. **No separate metadata field and no matcher AST** — one
+  representation, works from any app, naturally multi-valued.
 - **What counts:** sats boosts + fiat boosts (reported separately). Member-free
   boosts add contributors, not value. **Streams excluded** (policy, per show).
 - **Target:** USD cents canonical; sats derived at snapshot rate and labelled.

@@ -297,21 +297,35 @@ price move would silently change the fundraiser's goal. So:
   alongside, labelled as today's rate.
 - Progress shows `raised_usd` (see §2.3) and `pct = raised_usd / target_usd`.
 
-### 4.2 Matcher — composable, data not code
+### 4.2 Membership — a tag in the message (revised 2026-11-20)
 
 ```
-{:type :episode  :show "lup" :episode "700"}          ; structural match
-{:type :message  :regex "(?i)#\\s*700\\s*club"}        ; text match
-{:type :tag      :key :campaign :value "700club"}      ; future widget field
-{:any-of [...]} {:all-of [...]} {:not {...}}           ; composition
+:campaign/tag          "#700club"   ; the contract
+:campaign/also-episode "700"        ; optional single exception
 ```
 
-Compiled to a Datalog where-builder. Adding a campaign never adds code.
+Membership is two concrete facts, not a matcher language:
 
-**Start with `episode OR #700club`**: the hashtag makes pre-episode
-fundraising possible (eps 694-699), episode match covers the finale, and
-neither needs a widget change. The `:tag` form reserves the clean path for
-when the web-boost widget can emit a campaign field.
+```clojure
+(or (message-contains? boost (:campaign/tag campaign))
+    (= episode (:campaign/also-episode campaign)))
+```
+
+**Why a tag instead of a structured field** (this replaced an earlier
+`:any-of` matcher AST):
+
+- **One representation.** A `metadata.campaign` field plus a message tag plus
+  an episode rule meant three ways to belong, three ways to disagree — the same
+  failure class as the feed dedup `""` vs `null` bug.
+- **Universal.** It works from every podcast app, not just the web boost form.
+- **Multi-valued.** A message can carry `#700club` *and* another campaign's
+  tag, so simultaneous campaigns compose without answering an overlap spec.
+- **Self-documenting.** The tag is the contract, and it is the same string a
+  listener would type by hand.
+
+The web-boost form still offers a picker, but its only job is appending the
+canonical tag server-side (so it cannot be deleted after the fact). The picker
+is convenience, not mechanism.
 
 ### 4.3 Lens semantics — **DECIDED 2026-11-19: lens, not ring-fence**
 
@@ -403,9 +417,11 @@ if "live" is ever needed, the page can poll a cached artifact.
 
 **Decided 2026-11-19** (locked with Wes; see `docs/roadmap.md`):
 
-1. **Attribution: `#700club` tag OR episode 700.** The hashtag enables
-   pre-episode fundraising (eps 694–699); boosting ep 700 itself also counts.
-   No widget change required. `{:any-of [{:type :episode …} {:type :message …}]}`
+1. **Attribution: a tag in the message** (`#700club`), plus an optional
+   `:also-episode` for the finale. The web-boost picker appends the tag
+   server-side; **no separate campaign field** — one representation, works from
+   any app, multi-valued so campaigns compose. (Revised 2026-11-20 from an
+   earlier metadata-field + matcher-AST design; see `docs/dev-log.md`.)
 2. **What counts: sats boosts + fiat boosts. Member-free counts as presence
    (contributors) but not value. Streams excluded** (policy, so TWiB can flip).
 3. **Target currency: USD cents canonical**, sats derived at snapshot rate and
