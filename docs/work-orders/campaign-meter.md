@@ -37,7 +37,7 @@ it. Neither side knows the other's internals.
   "opens_at": 1795075200,
   "closes_at": 1799654400,
   "generated_at": 1795450000,
-  "rate": { "btc_usd": 95000.0, "at": 1795075200, "source": "mempool.space" },
+  "rate": { "btc_usd": 95000.0, "at": 1795450000, "source": "mempool.space" },
   "recent": [
     { "sats": 2222, "usd": 2.11, "sender": "genebean", "at": 1795449000,
       "message": "for the 700 club" }
@@ -48,7 +48,11 @@ it. Neither side knows the other's internals.
 ```
 
 Rules baked into the contract:
-- `raised.usd` uses the **frozen campaign rate**; it must never decrease.
+- `raised.usd` is converted with the rate **at emit time**, taken from the
+  existing cached price feed (`price_feed/get-btc-usd`, 5-min TTL + stale
+  fallback). `rate.at` records the moment, so the UI can label it honestly.
+- If the feed has neither a fresh nor a stale rate, the publisher **skips the
+  emit** (last good artifact stays) rather than publishing a wrong number.
 - `recent` is newest-first, capped at 20; `sender` may be `"anonymous"`.
 - `percent` is clamped for display but exact numbers stay exact.
 - Absent artifact ⇒ consumers render nothing, never `0`.
@@ -56,18 +60,21 @@ Rules baked into the contract:
 ## Steps
 
 ### W1 — campaign progress computation (scraper, Clojure)
-Files: new `src/boost_scraper/campaigns.clj`; new `test/boost_scraper/campaigns_test.clj`;
-add `:campaign/rate {:btc-usd … :at … :source …}` to `resources/campaigns.edn`.
+Files: new `src/boost_scraper/campaigns.clj`; new `test/boost_scraper/campaigns_test.clj`.
+No config change: the BTC/USD rate comes from `price_feed/get-btc-usd` at call time.
 - Load campaigns from the EDN resource.
 - `progress [conn campaign now] -> <contract map minus recent>` using
   `contributions` (window-bounded), membership = message contains tag
   (case-insensitive) OR episode = `also-episode`; respect policy
   (`:actions #{:boost}`, fiat counts, member-free presence only, self excluded).
-- USD: `sats / 1e8 * rate.btc_usd`, plus fiat cents / 100. Integer sats/cents in,
-  rounded USD out.
+- USD: `sats / 1e8 * rate`, plus fiat cents / 100, where `rate` is the cached
+  BTC/USD at emit time. Integer sats/cents in, rounded USD out.
+- No rate available (fresh or stale) → return a `:no-rate` result; the caller
+  must not publish. This is a refusal, not a fallback to zero.
 - Acceptance: golden test on fixtures produces exact usd/sats/percent/remaining;
   refusal test for unknown slug; boundary tests (before open, at close);
-  tag case-insensitivity; episode match; anonymous counted, unnamed; self excluded.
+  tag case-insensitivity; episode match; anonymous counted, unnamed; self
+  excluded; **no-rate refusal** (feed empty and no stale value ⇒ `:no-rate`).
 
 ### W2 — internal HTTP surface (scraper)
 Files: `src/boost_scraper/web.clj`, `test/boost_scraper/web_test.clj`.
@@ -81,6 +88,7 @@ Files: new `src/boost_scraper/publish.clj` + test; wire into the existing loop.
 - Serialize the contract to `campaign/<slug>.json` in a **private** bucket.
 - Timer-driven, **outside** the ingest path, per-publish timeout; a failed put
   must never stall ingestion and must leave the previous object intact.
+- `:no-rate` ⇒ skip the put entirely (keep last good object) and log it.
 - Acceptance: unit test for key/serialization; timeout test proves the caller
   is not blocked; no new ingest coupling.
 
@@ -113,10 +121,12 @@ Files: `src/main.ts` (+ styles), test for the pure render function.
 and the feed snippet for the JB feed host:
 
 ```xml
-<podcast:funding url="https://boost.jupiterbroadcasting.com/campaign/lup-700-brent">Help get Brent to the studio for LUP 700</podcast:funding>
+<podcast:funding url="https://boost.jupiterbroadcasting.com/#700club">Help get Brent to the studio for LUP 700</podcast:funding>
 ```
 (spec: `<podcast:funding>` is *Count: Multiple*; node value ≤128 chars; LUP
-already carries one Memberful funding tag, so this is an addition, not a swap.)
+already carries one Memberful funding tag, so this is an addition, not a swap.
+Points at the main page anchor for now — a dedicated campaign page is a later
+option, and the URL can move then.)
 
 ## Dependency graph / dispatch plan
 
@@ -143,8 +153,12 @@ editor (§3.4). Model IDs chosen at dispatch time from the roster.
 
 ## Risks
 
-- **Rate freeze** under-values later boosts if BTC moves a lot in 7 weeks. Label
-  the meter ("USD valued at campaign rate"); revisit if it ever looks wrong.
+- **Rate at emit time (decided 2026-11-20).** Reusing the cached feed is the
+  simpler design — no stored knob, and reports already use it. The accepted
+  tradeoff: a falling BTC price makes `raised.usd` retreat. Mitigations kept:
+  `rate.at` is published so the UI labels the conversion, `raised.sats` is
+  published alongside so the stable number is always visible, and the UI never
+  animates a decrease. Revisit if it ever looks bad on air.
 - **Tag capture ceiling** for third-party apps (Breez caps ~128 chars). The web
   form is exact because we append server-side; other apps are best-effort.
 - **First publish** must precede the first page hit, or the card shows the
