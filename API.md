@@ -237,9 +237,13 @@ invented rate is worse than no meter.
   "subtitle": "Studio time, travel, and a decent chair.",
   "tag": "#700club",
   "goal": { "usd": 2000.0, "sats": 3386903 },
-  "raised": { "usd": 0.87, "sats": 1477, "contributions": 2, "people": 2, "anonymous": 0 },
-  "percent": 0.0,
-  "remaining_usd": 1999.13,
+  "raised": { "usd": 2.87, "sats": 1477, "contributions": 3, "people": 2, "anonymous": 0 },
+  "split": {
+    "sats": { "usd": 0.87, "sats": 1477, "contributions": 2 },
+    "fiat": { "usd": 2.0, "sats": 0, "contributions": 1 }
+  },
+  "percent": 0.1,
+  "remaining_usd": 1997.13,
   "days_left": 52,
   "opens_at": 1795075200,
   "closes_at": 1799654400,
@@ -253,10 +257,17 @@ What the numbers mean:
 
 - `generated_at` is when this payload was emitted, not when a boost happened.
 - `goal.sats` is the fiat goal converted at `rate`, so it drifts as BTC moves.
-- `raised.sats` is the stable total. `raised.usd` is converted at **emit time**
-  with a single rate applied to the whole total, so it revalues on every publish
-  and can retreat when BTC falls. If you need a number that never moves
-  backwards, use `sats`.
+- `raised.usd` is the progress figure that matters, because the goal is a fiat
+  obligation. It is converted at **emit time** with a single rate, so the sats
+  portion revalues on every publish and can retreat when BTC falls. The fiat
+  portion is fixed.
+- `raised.sats` is the **sats rail only** — what arrived in sats, not the total
+  expressed in sats. Once fiat is in the mix, `raised.sats` against `goal.sats`
+  is not a fraction: a $2.00 boost adds dollars and zero sats. Use `raised.usd`
+  against `goal.usd`, or use `split`.
+- `split` says how the money actually arrived, rail by rail. It reconciles
+  exactly: `split.sats.usd + split.fiat.usd == raised.usd`, to the cent, because
+  each part is rounded before they are summed. This is the object to report on.
 - `percent` is one-decimal, so a sub-0.05% total legitimately rounds to `0.0`. A
   renderer should floor the fill width instead of showing an empty bar.
 - `remaining_usd` is the publisher's own arithmetic; prefer it over subtracting.

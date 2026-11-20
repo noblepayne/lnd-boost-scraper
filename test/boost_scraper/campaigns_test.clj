@@ -109,7 +109,7 @@
                    :action "stream" :iid "g-6"}))
   (let [p (progress test-campaign)]
     (testing "shape: the contract minus `recent`, and nothing else"
-      (is (= #{:slug :title :subtitle :tag :goal :raised :remaining_usd
+      (is (= #{:slug :title :subtitle :tag :goal :raised :split :remaining_usd
                :percent :days_left :opens_at :closes_at :generated_at :rate :cta}
              (set (keys p))))
       (is (= "test-camp" (:slug p)))
@@ -130,6 +130,13 @@
       (is (= 3 (get-in p [:raised :contributions])))
       (is (= 2 (get-in p [:raised :people])) "alice + bob are named people")
       (is (= 1 (get-in p [:raised :anonymous]))))
+    (testing "the split says which rail the money came in on"
+      (is (= {:usd 1010.0 :sats 1010000 :contributions 2} (get-in p [:split :sats])))
+      (is (= {:usd 250.0 :sats 0 :contributions 1} (get-in p [:split :fiat])))
+      (testing "and it reconciles with the headline total to the cent"
+        (is (= (get-in p [:raised :usd])
+               (+ (get-in p [:split :sats :usd]) (get-in p [:split :fiat :usd]))))
+        (is (= (get-in p [:raised :sats]) (get-in p [:split :sats :sats])))))
     (testing "percent is exact, remaining is goal minus raised"
       (is (= 63.0 (:percent p)))
       (is (= 740.0 (:remaining_usd p))))

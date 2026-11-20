@@ -212,13 +212,23 @@
         {people :people, anonymous :anonymous, n :count} (contributions/totals counted)
         value (reduce (fn [acc c]
                         (let [{:keys [sats cents]} (value-of policy c)]
-                          (-> acc (update :sats + sats) (update :cents + cents))))
-                      {:sats 0 :cents 0}
+                          (-> acc
+                              (update :sats + sats)
+                              (update :cents + cents)
+                              (update :sats-count #(if (pos? sats) (inc %) %))
+                              (update :fiat-count #(if (pos? cents) (inc %) %)))))
+                      {:sats 0 :cents 0 :sats-count 0 :fiat-count 0}
                       counted)
         btc-usd (double (:btc_usd rate))
         goal-cents (long (get-in campaign [:campaign/target :fiat-cents]))
         goal-usd (double (/ goal-cents 100.0))
-        raised-usd (round-to (usd-value (:sats value) (:cents value) btc-usd) 2)
+        ;; The two rails, valued separately and then summed. Rounding each part
+        ;; first keeps the published invariant exact — split.sats.usd +
+        ;; split.fiat.usd == raised.usd, to the cent — which is what makes the
+        ;; split usable for reporting instead of merely decorative.
+        sats-usd (round-to (/ (* (double (:sats value)) btc-usd) sats-per-btc) 2)
+        fiat-usd (round-to (/ (double (:cents value)) 100.0) 2)
+        raised-usd (round-to (+ sats-usd fiat-usd) 2)
         exact-usd (usd-value (:sats value) (:cents value) btc-usd)
         percent (if (pos? goal-usd)
                   (round-to (* 100.0 (/ exact-usd goal-usd)) 1)
@@ -237,6 +247,16 @@
               :contributions (long (or n 0))
               :people (long (or people 0))
               :anonymous (long (or anonymous 0))}
+     ;; How the money actually arrived, rail by rail. `raised.sats` is the sats
+     ;; rail only — it is NOT the total expressed in sats, and comparing it to
+     ;; `goal.sats` is meaningless once fiat is in the mix. This is the object
+     ;; that makes the mix legible.
+     :split {:sats {:usd sats-usd
+                    :sats (long (:sats value))
+                    :contributions (long (:sats-count value))}
+             :fiat {:usd fiat-usd
+                    :sats 0
+                    :contributions (long (:fiat-count value))}}
      ;; max(0, ...) — a campaign can close over goal; remaining must not go negative.
      :remaining_usd (round-to (max 0.0 (- goal-usd raised-usd)) 2)
      ;; Deliberately NOT clamped: clamping is a display concern (W5), and 118%
