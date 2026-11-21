@@ -803,3 +803,78 @@ Live checks (2026-11-20):
   unexciting; hiding it until the first contribution is a one-line policy change.
 - Not yet verified in a real browser (no browser tool in this session), nor with
   a live tagged boost. Both are on the post-launch list.
+
+---
+
+## 2026-11-20 · The meter froze: an unbounded query, not a busy box
+
+### Symptom
+
+The published artifact went stale at 16:54:49 and was 8.9 minutes old when a
+screenshot caught the card showing `delayed`. The UI was right — it refused to
+show a number that had stopped moving — but the fundraiser was down.
+
+### Diagnosis
+
+Thread dump on the live JVM, main thread RUNNABLE:
+
+```
+datalevin.db.DB._eav_scan_v_list
+boost_scraper.core$unique_content_ids
+boost_scraper.core$sync_mising_boosts_BANG_
+```
+
+`sync-mising-boosts!` was called with `(- AUTOSCRAPE_START 3600)` — a constant in
+**December 2023** — so every cycle re-diffed every boost ever recorded. Four
+queries per cycle (destination and source, twice over), each scanning 347k rows.
+
+### Measurements on the real database
+
+```
+unbounded window : 380,182 ms   347,352 rows
+7-day window     :       241 ms     1,149 rows
+```
+
+### The box was not the problem
+
+Worth writing down, because the obvious read was wrong. `MemAvailable` 18.6 GB,
+memory pressure `0.00` across 10s/60s/300s, swap I/O idle. Swap was full of
+**cold** pages, 8.3 GB of them belonging to `elementsd` (against 1.2 GB resident).
+The stall was a linear query losing a fight for disk to a full Bitcoin + Elements
++ mempool stack doing 20–40 MB/s of reads.
+
+### Three fixes
+
+1. **Decoupled publishing** (`cdfab51`). The publisher was a future inside the
+   ingest cycle, so ingest slowness silenced the meter for exactly as long as the
+   ingest took. It now runs on a daemon thread at 60s, verified publishing on
+   cadence while the cycle ran for minutes. This alone would have prevented the
+   outage.
+2. **Bounded the repair window** (`205618d`). Week of recent history instead of
+   everything since 2023. `SYNC_LOOKBACK_DAYS` overrides. The commented-out
+   `(two-days-ago)` at the call site says the intent was always bounded.
+3. **Indexed `invoice/creation_date`** (`5eb9ff1`). Kept, because it makes the
+   bounded query a 241ms range seek — but the index **alone did not fix this**:
+   measured with the index and an unbounded range it was still 380s, because the
+   planner had no reason to seek when the range was the entire database.
+
+Production after: `Syncing JB` → `Destination IDs` went from 8s warm / 9min
+loaded to **1 second**. Full sync across two sources: 6 seconds.
+
+### Two self-inflicted bugs worth remembering
+
+- **`reindex.clj` did not exit.** Datalevin starts non-daemon executor pools
+  (`dirigiste`, `manifold`), so `-main` returning left the JVM alive and idle.
+  The thread dump had no `main` thread at all — just `DestroyJavaVM` — and the
+  I/O counters froze because the work was done, not because it was stuck. It
+  read as a hung migration for 20 minutes. Fixed with `shutdown-agents` +
+  `System/exit 0`.
+- **I killed my own migration.** A cleanup `pkill -f migrate-index.sh` terminated
+  the loop that was still working through the databases. `pkill -f` matches your
+  own scripts as happily as the thing you meant.
+
+### Cost
+
+~45 minutes of meter downtime, of which roughly 20 was the JVM exit bug and the
+interrupted loop rather than the migration itself. alby 204s, jbnode ~5min,
+nodecan 16m49s to re-index.
