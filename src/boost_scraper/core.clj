@@ -210,6 +210,40 @@
 
 (def scrape-sleep-interval 60000)
 
+(def campaign-publish-interval-ms 60000)
+
+(defn publish-once!
+  "One publish attempt that cannot throw.
+
+   Split out so the swallowing is testable without starting a thread: the loop
+   below must survive anything the publisher does, because a dead publisher
+   looks exactly like a campaign nobody is boosting."
+  [conn log-fn]
+  (try
+    (publish/publish-campaigns! conn)
+    (catch Throwable t
+      (log-fn (str "Campaign publish error: " (.getMessage t))))))
+
+(defn start-campaign-publisher!
+  "Publish the meter on its own cadence, independent of ingest.
+
+   Coupled to the scrape cycle, a slow ingest silences the meter for exactly as
+   long as the ingest takes — which is how a nine-minute datalevin scan became a
+   nine-minute fundraising outage. Publishing needs the database, not fresh
+   data, so it does not have to wait for ingesting to finish."
+  [conn]
+  (doto (Thread.
+         (fn []
+           (loop []
+             (publish-once! conn println)
+             (try
+               (Thread/sleep (long campaign-publish-interval-ms))
+               (catch InterruptedException _ nil))
+             (recur))))
+    (.setName "campaign-publisher")
+    (.setDaemon true)
+    (.start)))
+
 (defn -main [& _]
   ;; TODO: proper startup validation
   (let [env (System/getenv)
@@ -248,6 +282,7 @@
       (if (and r2-account-id r2-access-key r2-secret-key r2-bucket)
         (println "R2 member-boost scraping enabled")
         (println "R2 member-boost scraping disabled (set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID_PATH, R2_SECRET_ACCESS_KEY_PATH, R2_BOOST_BUCKET)"))
+      (start-campaign-publisher! nodecan-conn)
       (while true
         (try
           (println "Starting Scrape Cycle...")
@@ -264,16 +299,13 @@
                                                           {:account-id r2-account-id
                                                            :access-key r2-access-key
                                                            :secret-key r2-secret-key
-                                                           :bucket r2-bucket}))))
-                publish-fut (utils/apply-virtual
-                             (fn [] (publish/publish-campaigns! nodecan-conn)))]
+                                                           :bucket r2-bucket}))))]
             ;; Wait for all scrapers and publishers, logging individual errors.
             (doseq [[label timeout-ms f] [["Alby"    600000 alby-fut]
                                           ["JB"      600000 lnd-fut]
                                           ["Nodecan" 600000 nodecan-fut]
                                           ["Zaprite" 300000 zaprite-fut]
-                                          ["R2"      300000 r2-fut]
-                                          ["Campaign publish" 120000 publish-fut]]]
+                                          ["R2"      300000 r2-fut]]]
               (when f
                 (try
                   (let [result (deref f timeout-ms ::timeout)]

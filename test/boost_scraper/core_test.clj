@@ -65,3 +65,18 @@
     (is (nil? (and "a" "b" "c" nil "d")))
     (is (nil? (and "a" "b" "c" "d" nil)))
     (is (= "e" (and "a" "b" "c" "d" "e")))))
+
+(deftest test-publish-once-survives-a-throwing-publisher
+  (testing "a publisher that throws cannot kill the background loop"
+    (with-redefs [boost-scraper.publish/publish-campaigns!
+                  (fn [_conn] (throw (ex-info "r2 is down" {})))]
+      (let [logs (atom [])]
+        (core/publish-once! ::conn #(swap! logs conj %))
+        (is (= 1 (count @logs)))
+        (is (re-find #"r2 is down" (first @logs)))))))
+
+(deftest test-publish-once-is-quiet-on-success
+  (with-redefs [boost-scraper.publish/publish-campaigns! (fn [_conn] :ok)]
+    (let [logs (atom [])]
+      (core/publish-once! ::conn #(swap! logs conj %))
+      (is (empty? @logs) "the publisher logs its own receipt; this must not add one"))))
