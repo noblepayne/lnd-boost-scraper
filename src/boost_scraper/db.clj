@@ -9,7 +9,11 @@
   {:invoice/identifier {:db/valueType :db.type/string
                         :db/unique :db.unique/identity}
    :invoice/source {:db/valueType :db.type/string}
-   :invoice/creation_date {:db/valueType :db.type/long}
+   ;; Indexed because the cross-database sync filters by it on every cycle, and
+   ;; without an AVE index Datalevin scans every content_id and does a random
+   ;; lookup per entity — 378k of them, which took nine minutes under I/O load.
+   :invoice/creation_date {:db/valueType :db.type/long
+                           :db/index true}
    :invoice/creation_date_per_30 {:db/valueType :db.type/long}
    :invoice/created_at {:db/valueType :db.type/instant}
    :invoice/add_index {:db/valueType :db.type/long}
