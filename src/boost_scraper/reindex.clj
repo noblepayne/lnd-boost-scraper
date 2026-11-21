@@ -39,4 +39,10 @@
     (System/exit 2))
   (doseq [dir dirs]
     (reindex-one! dir))
-  (println "All done."))
+  (println "All done.")
+  ;; Datalevin starts non-daemon executor pools (dirigiste / manifold) that
+  ;; outlive `-main`. Without this the process finishes its work and then sits
+  ;; there forever, which reads exactly like a hung migration — it cost 20
+  ;; minutes of downtime to learn that.
+  (shutdown-agents)
+  (System/exit 0))
