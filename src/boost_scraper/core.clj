@@ -146,6 +146,24 @@
                   nil)))))))
 
 (def AUTOSCRAPE_START (->epoch #inst "2023-12-31T23:59Z"))
+
+(def sync-lookback-seconds
+  "How far back the cross-database repair looks.
+
+   This used to be `AUTOSCRAPE_START - 3600` — a constant in December 2023 — so
+   every cycle re-diffed every boost ever recorded: 347k rows, 380 seconds per
+   query, two queries per source, three sources. That is what stalled the ingest
+   loop. Bounded to a week the same query returns 1,149 rows in 241ms.
+
+   The per-source scrapers are the primary ingest path; this only repairs what
+   another node is missing, so a week of recent history is the useful window."
+  (or (some-> (System/getenv "SYNC_LOOKBACK_DAYS") not-empty (Long/parseLong) (* 86400))
+      (* 7 86400)))
+
+(defn sync-window-start
+  "Epoch seconds at the start of the repair window."
+  []
+  (- (quot (System/currentTimeMillis) 1000) sync-lookback-seconds))
 #_(def AUTOSCRAPE_START (->epoch #inst "2024-09-01T00:00Z"))
 
 (defn scrape-alby-boosts-until-epoch [conn token epoch wait]
@@ -317,9 +335,9 @@
           (try
             (println "Syncing missing boosts...")
             (println "Syncing JB")
-            (sync-mising-boosts! nodecan-conn lnd-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
+            (sync-mising-boosts! nodecan-conn lnd-conn (sync-window-start))
             (println "Syncing alby")
-            (sync-mising-boosts! nodecan-conn alby-conn (- AUTOSCRAPE_START 3600) #_(two-days-ago))
+            (sync-mising-boosts! nodecan-conn alby-conn (sync-window-start))
             (println "Finished syncing missing boosts")
             (catch Exception e
               (println "Sync error:" (.getMessage e))))

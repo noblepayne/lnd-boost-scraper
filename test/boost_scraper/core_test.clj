@@ -80,3 +80,11 @@
     (let [logs (atom [])]
       (core/publish-once! ::conn #(swap! logs conj %))
       (is (empty? @logs) "the publisher logs its own receipt; this must not add one"))))
+
+(deftest test-sync-window-is-bounded
+  (testing "the repair window is days, not 'everything since 2023'"
+    (let [now (quot (System/currentTimeMillis) 1000)
+          start (core/sync-window-start)]
+      (is (< start now) "in the past")
+      (is (> start core/AUTOSCRAPE_START) "must not re-diff all history")
+      (is (< (- now start) (* 400 86400)) "bounded to a sensible lookback"))))
