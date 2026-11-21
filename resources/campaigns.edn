@@ -27,12 +27,12 @@
    ;; One sentence for the page lede and the card. Distils :campaign/description,
    ;; and sets up the stretch line's chair.
    :campaign/pitch
-   "Brent has been part of this ride since the beginning. For 700 we're bringing him in from Sudbury — a flight, a bed, and a decent chair."
+   "We want to celebrate 700 together, in one room. That means getting Brent here from Sudbury: a flight, a bed, and a decent chair."
    :campaign/subtitle
    "Studio time, travel, and a decent chair."
    :campaign/description
-   (str "Brent has been part of this ride since the beginning. For episode 700 "
-        "we want him in the studio with Chris — in person, not over a link. "
+   (str "For episode 700 we want Brent in the studio with Chris — in person, "
+        "not over a link. "
         "That means a flight from Sudbury and a place to stay, and we're tight "
         "right now.\n\n"
         "Boost anything from episodes 694 through 700 — pick the 700 Club on the "
