@@ -1,5 +1,6 @@
 (ns boost-scraper.reports
-  (:require [boost-scraper.utils :as utils]
+  (:require [boost-scraper.campaigns :as campaigns]
+            [boost-scraper.utils :as utils]
             [clojure.instant]
             [clojure.string :as str]
             [clojure.pprint :as pprint]
@@ -458,6 +459,67 @@
     (apply max-key score-metadata boosts)
     nil))
 
+(defn- campaign-labels
+  "The campaign tags this boost belongs to, by the same rule the meter uses."
+  [campaigns boost]
+  (->> campaigns
+       (filter #(campaigns/matches-boost? % boost))
+       (mapv :campaign/tag)
+       (remove str/blank?)
+       vec))
+
+(defn annotate-campaigns
+  "Tag every boost in the report with the campaigns it belongs to.
+
+   Done once, before formatting, so the row marker and the summary cannot
+   disagree with each other or with the meter."
+  [report]
+  (let [cs (campaigns/campaigns)]
+    (reduce (fn [r k]
+              (if (seq (get r k))
+                (update r k
+                        (fn [batches]
+                          (mapv (fn [batch]
+                                  (update batch :boosts
+                                          (fn [bs]
+                                            (mapv #(assoc % :campaign/labels
+                                                          (campaign-labels cs %))
+                                                  bs))))
+                                batches)))
+                r))
+            report
+            [:ballers :boosts :thanks :fiat-boosts :member-free-boosts])))
+
+(defn campaign-summary
+  "Per-campaign totals across every section, sats and fiat kept apart."
+  [report]
+  (let [batches (mapcat #(get report %) [:ballers :boosts :thanks :fiat-boosts :member-free-boosts])
+        boosts (mapcat :boosts batches)]
+    (->> boosts
+         (mapcat (fn [b]
+                   (for [tag (:campaign/labels b)]
+                     {:tag tag
+                      :sats (long (or (:boostagram/value_sat_total b) 0))
+                      :fiat-cents (long (or (:boostagram/amount_fiat_cents b) 0))})))
+         (group-by :tag)
+         (sort-by key)
+         (mapv (fn [[tag rows]]
+                 {:tag tag
+                  :count (count rows)
+                  :sats (reduce + (map :sats rows))
+                  :fiat-cents (reduce + (map :fiat-cents rows))})))))
+
+(defn format-campaign-section [summary]
+  (when (seq summary)
+    (str "\n\n## Campaigns"
+         (str/join ""
+                   (for [{:keys [tag count sats fiat-cents]} summary]
+                     (str "\n+ " tag ": " (int-comma count) " boost"
+                          (when (not= 1 count) "s")
+                          " — " (int-comma sats) " sats"
+                          (when (pos? fiat-cents)
+                            (str ", $" (format "%.2f" (/ fiat-cents 100.0)) " fiat"))))))))
+
 (defn format-boost-batch-details [boosts]
   (let [sorted (sort-by boost-sort-key boosts)
         best (best-metadata sorted)
@@ -483,13 +545,15 @@
                     invoice/creation_date
                     boostagram/amount_fiat_cents
                     boostagram/amount_fiat_currency
-                    boostagram/payment_rail]} sorted]
+                    boostagram/payment_rail campaign/labels]} sorted]
         (str
          "+ " (utils/format-date creation_date) " (" creation_date ")" "\n"
          "+ " (format-value-line {:boostagram/amount_fiat_cents amount_fiat_cents
                                   :boostagram/amount_fiat_currency amount_fiat_currency
                                   :boostagram/payment_rail payment_rail
                                   :boostagram/value_sat_total value_sat_total}) "\n"
+         (when (seq labels)
+           (str "+ " (str/join " " (map #(str % " ✓") labels)) "\n"))
          (str/join "\n" (map #(str "> " %) (str/split-lines (or message "No Message Found :("))))))))))
 
 (defn format-boost-batch [{:keys [sender total count boosts]}]
@@ -571,6 +635,10 @@
             (str "\n+ Total Member Free Boosts: " (int-comma free-count)
                  " (" (int-comma free-senders) " member"
                  (when (not= 1 free-senders) "s") ")"))))
+       (format-campaign-section (campaign-summary {:ballers ballers :boosts boosts
+                                                    :thanks thanks
+                                                    :fiat-boosts fiat-boosts
+                                                    :member-free-boosts member-free-boosts}))
        (when (seq source-breakdown)
          (let [sorted (reverse (sort-by (fn [[_ v]] (:count v)) source-breakdown))
                total-count (reduce + (map (fn [[_ v]] (:count v)) source-breakdown))
@@ -617,6 +685,7 @@
        sort-report
        normalize-report
        (#(add-fiat-to-total % fiat-sats-rate))
+       annotate-campaigns
        format-sorted-report))
 
 (defn first-booster [conn episode]

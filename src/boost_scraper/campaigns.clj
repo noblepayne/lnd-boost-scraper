@@ -124,6 +124,26 @@
         (str/starts-with? ep (str want ":"))
         (str/starts-with? ep (str want " ")))))
 
+
+(defn matches-boost?
+  "Does this boost belong to `campaign` under its two membership facts?
+
+   The message carries the tag (any case; terminal punctuation is fine because
+   the rule is containment), or the boost landed on the campaign's episode.
+
+   Window and scope are deliberately not checked here — the caller knows which
+   report it is building, and the report has already filtered to one show and one
+   timespan. Public because the report labels rows with it: a second definition
+   of 'counts' is exactly how a report starts disagreeing with the meter."
+  [campaign boost]
+  (let [msg (:boostagram/message boost)
+        ep (:boostagram/episode boost)
+        tag (:campaign/tag campaign)
+        also (:campaign/also-episode campaign)]
+    (boolean
+     (or (message-match? msg tag)
+         (and (some? also) (episode-matches? also ep))))))
+
 (defn- member?
   "Membership is two concrete facts, per docs/campaign-goal-spec.md §4.2."
   [tagged also-episode contribution]

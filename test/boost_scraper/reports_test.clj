@@ -1504,3 +1504,55 @@
           result (reports/sort-report raw)
           order (mapv :sender (:boosts result))]
       (is (= ["old-sender" "new-sender"] order)))))
+
+;; ============================================================================
+;; Campaign labelling: does this boost count toward the 700 club?
+;; ============================================================================
+
+(defn- batch [sats & messages]
+  {:sender "alice"
+   :total (apply + sats)
+   :count (count sats)
+   :boosts (mapv (fn [sats message]
+                   {:boostagram/value_sat_total sats
+                    :boostagram/message message
+                    :boostagram/episode "693: Two Cities, One Linux"
+                    :invoice/creation_date 1795211000
+                    :invoice/identifier (str "inv-" sats)})
+                 sats messages)})
+
+(deftest test-report-marks-campaign-boosts
+  (testing "tagged rows are marked, untagged rows are not"
+    (let [report {:ballers [] :boosts [(batch [1000 2000] "for the #700club!" "just a boost")] :thanks []
+                  :fiat-boosts [] :member-free-boosts []
+                  :boost-summary {:boost_total_sats 3000 :boost_total_boosts 2 :boost_total_boosters 1}
+                  :stream-summary {:stream_total_sats 0 :stream_total_streams 0 :stream_total_streamers 0}
+                  :summary {:total_sats 3000 :total_invoices 2 :total_unique_boosters 1 :last_seen_id "x"}
+                  :source-breakdown []}
+          md (-> report reports/annotate-campaigns reports/format-sorted-report)]
+      (is (str/includes? md "#700club ✓") "the tagged boost is marked")
+      (is (= 1 (count (re-seq #"#700club ✓" md))) "and only once"))))
+
+(deftest test-report-campaign-summary-counts-only-tagged
+  (let [report {:ballers [] :boosts [(batch [1000 2000 500] "#700club" "no tag" "yes #700CLUB")] :thanks []
+                :fiat-boosts [] :member-free-boosts []}
+        summary (-> report reports/annotate-campaigns reports/campaign-summary)]
+    (is (= 1 (count summary)))
+    (is (= 2 (:count (first summary))) "two of three boosts count")
+    (is (= 1500 (:sats (first summary))) "and only their sats")))
+
+(deftest test-report-without-campaign-boosts-has-no-section
+  (let [report {:ballers [] :boosts [(batch [1000] "nothing to do with it")] :thanks []
+                :fiat-boosts [] :member-free-boosts []}
+        md (-> report reports/annotate-campaigns reports/format-sorted-report)]
+    (is (not (str/includes? md "## Campaigns")))
+    (is (not (str/includes? md "✓")))))
+
+(deftest test-episode-membership-counts-too
+  (let [report {:ballers [] :boosts [(batch [1000] "no tag here")] :thanks []
+                :fiat-boosts [] :member-free-boosts []}
+        ;; the campaign counts episode 700 as well as the tag
+        with-episode (update-in report [:boosts 0 :boosts 0]
+                                assoc :boostagram/episode "700: The Big One")]
+    (is (= 1 (count (get-in (reports/annotate-campaigns with-episode) [:boosts 0 :boosts 0 :campaign/labels])))
+        "a boost on the finale episode counts without a tag")))
